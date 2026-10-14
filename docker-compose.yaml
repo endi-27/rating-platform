@@ -1,0 +1,180 @@
+services:
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: rating_postgres
+    restart: unless-stopped
+    shm_size: 256mb
+    environment:
+      POSTGRES_USER: ${APP_CONFIG__DB__USER:-rating_user}
+      POSTGRES_PASSWORD: ${APP_CONFIG__DB__PASSWORD:-rating_secret_password}
+      POSTGRES_DB: ${APP_CONFIG__DB__NAME:-rating_db}
+      POSTGRES_INITDB_ARGS: "--encoding=UTF-8 --lc-collate=C --lc-ctype=C"
+    ports:
+      - "127.0.0.1:${DB_HOST_PORT:-5434}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./backups:/backups:z
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${APP_CONFIG__DB__USER:-rating_user} -d ${APP_CONFIG__DB__NAME:-rating_db}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - rating_network
+
+  db_backup:
+    image: postgres:16-alpine
+    container_name: rating_db_backup
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      APP_CONFIG__DB__HOST: postgres
+    volumes:
+      - ./backups:/backups:z
+      - ./logs/backups:/var/log/backups:z
+      - ./scripts/pg_backup_rotated.sh:/pg_backup_rotated.sh:ro,z
+    entrypoint: ["/bin/sh", "-c", "export -p > /etc/environment && mkdir -p /var/log/backups && echo \"0 2 * * * /bin/sh /pg_backup_rotated.sh >> /var/log/backups/backup.log 2>&1\" | crontab - && crond -f -l 2"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - rating_network
+
+  redis:
+    image: redis:7-alpine
+    container_name: rating_redis
+    restart: unless-stopped
+    environment:
+      REDISCLI_AUTH: ${APP_CONFIG__REDIS__PASSWORD:-rating_redis_password}
+    command: >
+      --requirepass ${APP_CONFIG__REDIS__PASSWORD:-rating_redis_password}
+      --maxmemory 256mb
+      --maxmemory-policy volatile-lru
+      --save 60 1
+    ports:
+      - "127.0.0.1:${APP_CONFIG__REDIS__PORT:-6379}:6379"
+    volumes:
+      - redis_data:/data
+    deploy:
+      resources:
+        limits:
+          cpus: '0.50'
+          memory: 300M
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${APP_CONFIG__REDIS__PASSWORD:-rating_redis_password}", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - rating_network
+
+  migrator:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: rating_migrator
+    restart: "no"
+    command: ["sh", "-c", "alembic upgrade head && python scripts/seed_superadmin.py"]
+    env_file:
+      - .env
+    environment:
+      APP_CONFIG__DB__HOST: postgres
+      APP_CONFIG__REDIS__HOST: redis
+    volumes:
+      - ./backend/alembic:/app/alembic:ro,z
+      - ./backend/scripts:/app/scripts:ro,z
+      - ./backend/src:/app/src:ro,z
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - rating_network
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: rating_backend
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      APP_CONFIG__DB__HOST: postgres
+      APP_CONFIG__REDIS__HOST: redis
+      APP_CONFIG__LOG__DIR: /logs
+      APP_CONFIG__STORAGE__DIR: /storage
+    volumes:
+      - ./backend:/app:z
+      - /app/.venv
+      - ./logs:/logs:z
+      - ./storage:/storage:z
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrator:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:8000/api/v1/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - rating_network
+
+  worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: rating_worker
+    restart: unless-stopped
+    command: ["python", "-m", "arq", "src.tasks.worker.WorkerSettings"]
+    env_file:
+      - .env
+    environment:
+      APP_CONFIG__DB__HOST: postgres
+      APP_CONFIG__REDIS__HOST: redis
+      APP_CONFIG__LOG__DIR: /logs
+      APP_CONFIG__STORAGE__DIR: /storage
+    volumes:
+      - ./backend:/app:z
+      - /app/.venv
+      - ./logs:/logs:z
+      - ./storage:/storage:z
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrator:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 384M
+    networks:
+      - rating_network
+
+volumes:
+  postgres_data:
+  redis_data:
+
+networks:
+  rating_network:
+    driver: bridge

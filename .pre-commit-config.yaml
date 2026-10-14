@@ -1,0 +1,57 @@
+# ==============================================================================
+# Distributed Reviews & Ratings Platform — Pre-commit Hook Configuration
+# ==============================================================================
+default_language_version:
+  python: python3.12
+
+repos:
+  # 1. Загальні санітарні перевірки
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+        exclude: ^(storage/|docs/domain/)
+      - id: end-of-file-fixer
+        exclude: ^(storage/|docs/domain/)
+      - id: check-yaml
+        args: [--unsafe]
+      - id: check-added-large-files
+        args: ['--maxkb=1000']
+      - id: check-merge-conflict
+
+  # 2. Швидкі Python перевірки бекенду через локальне uv-середовище
+  - repo: local
+    hooks:
+      - id: ruff-check
+        name: ruff check (backend)
+        entry: uv run --directory backend ruff check --fix
+        language: system
+        types: [python]
+        files: ^backend/
+        pass_filenames: false
+
+      - id: ruff-format
+        name: ruff format (backend)
+        entry: uv run --directory backend ruff format
+        language: system
+        types: [python]
+        files: ^backend/
+        pass_filenames: false
+
+      - id: mypy
+        name: mypy type check (backend)
+        entry: uv run --directory backend mypy src tests scripts
+        language: system
+        types: [python]
+        files: ^backend/
+        pass_filenames: false
+
+  # 3. Швидка перевірка та форматування фронтенду через Biome
+  - repo: local
+    hooks:
+      - id: biome-check
+        name: biome check (frontend)
+        entry: bash -c "test -f frontend/package.json && npm --prefix frontend run lint || true"
+        language: system
+        files: ^frontend/.*\.(ts|tsx|js|jsx|json)$
+        pass_filenames: false

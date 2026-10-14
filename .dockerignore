@@ -1,0 +1,115 @@
+# ==============================================================================
+# Monorepo .dockerignore
+# ==============================================================================
+
+# Version Control & Git
+**/.git
+**/.git*
+**/.github
+.gitmodules
+.gitattributes
+
+# Environment Variables, Certificates & Secrets
+**/.env
+**/.env.*
+!.env.example
+!.env.template
+**/.envrc
+certs/
+**/*.pem
+**/*.key
+**/*.crt
+**/*.csr
+**/*.cer
+**/*.pfx
+**/*.p12
+
+# IDEs, Editors & AI Agents
+**/.vscode
+**/.idea
+**/.cursor
+**/.cursorrules
+**/*.suo
+**/*.sln
+**/*.swp
+**/.DS_Store
+**/Thumbs.db
+
+# Host Infrastructure, Scripts & Documentation (Not needed inside container images)
+docs/
+scripts/
+nginx/
+README.md
+docker-compose*.yml
+docker-compose*.yaml
+
+# Persistent Volumes & Temporary Directories
+storage/
+backups/
+logs/
+temp/
+tmp/
+scratch/
+temp_generated_docs/
+**/logs
+**/temp_generated_docs
+**/storage
+**/backups
+**/temp
+**/tmp
+
+# Database Dumps, Backups & Archives
+**/*.db
+**/*.sqlite3
+**/*.sqlite3-journal
+**/*.backup
+**/*.dump
+**/*.sql
+**/*.sql.gz
+**/*.pgdump
+**/*.psql
+**/*.dmp
+**/*.tar
+**/*.tar.gz
+**/*.tgz
+**/*.zip
+**/*.7z
+**/*.rar
+**/*.gz
+**/*.in_progress
+**/*.tmp
+**/*.temp
+
+# Python & Backend Artifacts
+**/.venv
+**/venv
+**/env
+**/ENV
+**/__pycache__
+**/*.py[codz]
+**/*.pyc
+**/*.pyo
+**/*.pyd
+**/.pytest_cache
+**/.ruff_cache
+**/.mypy_cache
+**/.coverage
+htmlcov/
+
+# Backend specific ignored dev files
+backend/tests/
+backend/Dockerfile
+backend/.dockerignore
+backend/README.md
+
+# Frontend & Node.js Artifacts (e2e tests & dev configs)
+**/node_modules
+**/dist
+**/.next
+**/out
+**/.nuxt
+**/playwright-report
+**/test-results
+frontend/e2e
+frontend/Dockerfile
+frontend/.dockerignore
