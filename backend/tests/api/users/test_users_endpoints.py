@@ -208,7 +208,6 @@ async def test_create_user_lifecycle_and_validation(
     assert forbid_resp.status_code == 403
 
 
-
 @pytest.mark.asyncio
 async def test_update_self_profile_me_endpoints(
     api_client: AsyncClient,
@@ -535,7 +534,6 @@ async def test_admin_reset_user_password_endpoints(
     assert sa_reset_by_admin.json()["error_code"] in ("SUPER_ADMIN_PROTECTED", "CONFLICT")
 
 
-
 @pytest.mark.asyncio
 async def test_deactivate_and_restore_user_endpoints(
     api_client: AsyncClient,
@@ -636,7 +634,6 @@ async def test_deactivate_and_restore_user_endpoints(
     assert sa_deact_by_admin.json()["error_code"] in ("SUPER_ADMIN_PROTECTED", "CONFLICT")
 
 
-
 @pytest.mark.asyncio
 async def test_delete_user_and_preview_endpoints(
     api_client: AsyncClient,
@@ -691,4 +688,3 @@ async def test_delete_user_and_preview_endpoints(
     sa_del_by_admin = await api_client.delete(f"/api/v1/users/{superadmin_user.id}", cookies=admin_cookies)
     assert sa_del_by_admin.status_code in (403, 409)
     assert sa_del_by_admin.json()["error_code"] in ("SUPER_ADMIN_PROTECTED", "CONFLICT")
-

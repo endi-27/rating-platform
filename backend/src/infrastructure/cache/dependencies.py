@@ -17,6 +17,9 @@ def get_cache_dependency_graph() -> dict[str, tuple[str, ...]]:
         ns.permissions: (ns.permissions, ns.roles, ns.users),
         ns.roles: (ns.roles, ns.users),
         ns.users: (ns.users,),
+        # Таргети та відгуки
+        ns.targets: (ns.targets,),
+        ns.reviews: (ns.reviews, ns.targets),
     }
 
 

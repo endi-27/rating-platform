@@ -197,4 +197,3 @@ def admin_cookies(
 ) -> dict[str, str]:
     """Cookies авторизованого користувача з усіма правами (не super_admin)."""
     return auth_cookies_factory({"sub": str(admin_user_with_permissions.id), "role": "viewer"})
-

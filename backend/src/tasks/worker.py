@@ -11,12 +11,14 @@ from sqlalchemy.ext.asyncio import (
 
 # Реєстрація всіх ORM-моделей у Base.metadata для коректної роботи ForeignKey зв'язків у фоновому воркері
 import src.modules.auth.infrastructure.models  # noqa: F401
+import src.modules.reviews.infrastructure.models  # noqa: F401
 import src.modules.users.infrastructure.models  # noqa: F401
 from src.core import logger, set_current_username, settings, setup_worker_logging
 from src.tasks.cron import cron_jobs
 from src.tasks.functions import (
     cleanup_expired_refresh_tokens_task,
     cleanup_expired_temp_files_task,
+    recalculate_bayesian_rating_task,
 )
 
 
@@ -83,6 +85,7 @@ class WorkerSettings:
     functions = [
         cleanup_expired_temp_files_task,
         cleanup_expired_refresh_tokens_task,
+        recalculate_bayesian_rating_task,
     ]
 
     # Список періодичних cron-задач

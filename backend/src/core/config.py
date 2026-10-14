@@ -98,6 +98,8 @@ class CacheNamespaceSettings(BaseModel):
     users: Annotated[str, Field(description="Namespace for users")] = "users"
     roles: Annotated[str, Field(description="Namespace for roles")] = "roles"
     permissions: Annotated[str, Field(description="Namespace for permissions")] = "permissions"
+    targets: Annotated[str, Field(description="Namespace for targets")] = "targets"
+    reviews: Annotated[str, Field(description="Namespace for reviews")] = "reviews"
 
 
 class CacheSettings(BaseModel):

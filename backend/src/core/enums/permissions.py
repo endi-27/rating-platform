@@ -27,3 +27,17 @@ class PermissionCode(enum.StrEnum):
 
     # Дозволи (Permissions)
     PERMISSIONS_READ = "permissions:read"
+
+    # Об'єкти оцінювання (Targets)
+    TARGETS_READ = "targets:read"
+    TARGETS_CREATE = "targets:create"
+    TARGETS_UPDATE = "targets:update"
+    TARGETS_DELETE = "targets:delete"
+
+    # Відгуки та рейтинги (Reviews)
+    REVIEWS_READ = "reviews:read"
+    REVIEWS_CREATE = "reviews:create"
+    REVIEWS_UPDATE = "reviews:update"
+    REVIEWS_DELETE = "reviews:delete"
+    REVIEWS_MODERATE = "reviews:moderate"
+    REVIEWS_VOTE = "reviews:vote"
