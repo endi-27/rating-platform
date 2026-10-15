@@ -276,7 +276,7 @@ async def test_change_self_password_endpoints(
         cookies=superadmin_cookies,
     )
     user_id = create_resp.json()["id"]
-    user_cookies = auth_cookies_factory({"sub": user_id, "role": "viewer"})
+    user_cookies = auth_cookies_factory({"sub": user_id, "role": "user"})
 
     # 1. 200 OK успішна зміна пароля
     new_pw = "BrandNewStrongPassword456!"
@@ -342,7 +342,7 @@ async def test_change_self_username_endpoints(
         cookies=superadmin_cookies,
     )
     user_id = create_resp.json()["id"]
-    user_cookies = auth_cookies_factory({"sub": user_id, "role": "viewer"})
+    user_cookies = auth_cookies_factory({"sub": user_id, "role": "user"})
 
     # 1. 200 OK успішна зміна логіна
     new_uname = f"uname_new_{uuid7().hex[:6]}"

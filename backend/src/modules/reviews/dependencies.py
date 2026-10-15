@@ -19,6 +19,7 @@ from src.modules.reviews.domain.interfaces import (
     IReviewVoteRepository,
     ITargetRatingRepository,
     ITargetRepository,
+    IUserGateway,
 )
 from src.modules.reviews.infrastructure.repositories import (
     SqlAlchemyReviewRepository,
@@ -30,8 +31,9 @@ from src.modules.reviews.queries import (
     ReviewQueryService,
     TargetQueryService,
 )
+from src.modules.users import get_users_public_gateway
 
-# === 1. Репозиторії (Write Path) ===
+# === 1. Репозиторії та шлюзи (Write Path) ===
 
 
 def get_target_repo(
@@ -58,6 +60,12 @@ def get_review_vote_repo(
     return SqlAlchemyReviewVoteRepository(session=session)
 
 
+def get_user_gateway(
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+) -> IUserGateway:
+    return get_users_public_gateway(session=session)
+
+
 # === 2. Query Services (Read-Side CQRS / Read Replica Session) ===
 
 
@@ -81,12 +89,14 @@ def get_create_target_uc(
     target_repo: Annotated[ITargetRepository, Depends(get_target_repo)],
     rating_repo: Annotated[ITargetRatingRepository, Depends(get_target_rating_repo)],
     event_bus: Annotated[IEventBus, Depends(get_event_bus)],
+    user_gateway: Annotated[IUserGateway, Depends(get_user_gateway)],
 ) -> CreateTargetUseCase:
     return CreateTargetUseCase(
         uow=uow,
         target_repo=target_repo,
         rating_repo=rating_repo,
         event_bus=event_bus,
+        user_gateway=user_gateway,
     )
 
 
@@ -96,6 +106,7 @@ def get_create_review_uc(
     rating_repo: Annotated[ITargetRatingRepository, Depends(get_target_rating_repo)],
     review_repo: Annotated[IReviewRepository, Depends(get_review_repo)],
     event_bus: Annotated[IEventBus, Depends(get_event_bus)],
+    user_gateway: Annotated[IUserGateway, Depends(get_user_gateway)],
 ) -> CreateReviewUseCase:
     return CreateReviewUseCase(
         uow=uow,
@@ -103,6 +114,7 @@ def get_create_review_uc(
         rating_repo=rating_repo,
         review_repo=review_repo,
         event_bus=event_bus,
+        user_gateway=user_gateway,
     )
 
 
@@ -111,12 +123,14 @@ def get_vote_review_uc(
     review_repo: Annotated[IReviewRepository, Depends(get_review_repo)],
     vote_repo: Annotated[IReviewVoteRepository, Depends(get_review_vote_repo)],
     event_bus: Annotated[IEventBus, Depends(get_event_bus)],
+    user_gateway: Annotated[IUserGateway, Depends(get_user_gateway)],
 ) -> VoteReviewUseCase:
     return VoteReviewUseCase(
         uow=uow,
         review_repo=review_repo,
         vote_repo=vote_repo,
         event_bus=event_bus,
+        user_gateway=user_gateway,
     )
 
 

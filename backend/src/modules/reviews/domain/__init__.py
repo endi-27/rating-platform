@@ -14,12 +14,14 @@ from src.modules.reviews.domain.exceptions import (
     SelfReviewVoteForbiddenException,
     TargetNotFoundException,
     TargetSlugAlreadyExistsException,
+    UserNotFoundException,
 )
 from src.modules.reviews.domain.interfaces import (
     IReviewRepository,
     IReviewVoteRepository,
     ITargetRatingRepository,
     ITargetRepository,
+    IUserGateway,
 )
 from src.modules.reviews.domain.models import Review, ReviewVote, Target, TargetRating
 
@@ -28,6 +30,7 @@ __all__ = [
     "IReviewVoteRepository",
     "ITargetRatingRepository",
     "ITargetRepository",
+    "IUserGateway",
     "InvalidScoreException",
     "Review",
     "ReviewAlreadyExistsException",
@@ -45,4 +48,5 @@ __all__ = [
     "TargetRating",
     "TargetRatingRecalculatedEvent",
     "TargetSlugAlreadyExistsException",
+    "UserNotFoundException",
 ]

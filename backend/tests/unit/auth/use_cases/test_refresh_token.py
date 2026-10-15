@@ -32,8 +32,8 @@ from tests.unit.fakes import FakeEventBus, FakeUnitOfWork
 def _create_user_and_role() -> User:
     role = Role(
         id=uuid7(),
-        code=SystemRole.VIEWER.value,
-        name="Глядач",
+        code=SystemRole.USER.value,
+        name="Користувач",
         permissions=set(),
     )
     return User(

@@ -1,4 +1,5 @@
 from collections.abc import Sequence
+from datetime import UTC, datetime
 from decimal import Decimal
 from uuid import UUID
 
@@ -7,8 +8,10 @@ from src.modules.reviews.domain.interfaces import (
     IReviewVoteRepository,
     ITargetRatingRepository,
     ITargetRepository,
+    IUserGateway,
 )
 from src.modules.reviews.domain.models import Review, ReviewVote, Target, TargetRating
+from src.modules.users.queries.dto import UserResponseDTO
 
 
 class FakeTargetRepository(ITargetRepository):
@@ -142,3 +145,34 @@ class FakeReviewVoteRepository(IReviewVoteRepository):
             del self.votes[vote_id]
             return True
         return False
+
+
+class FakeUserGateway(IUserGateway):
+    """Швидкий тестовий дублер IUserGateway для юніт-тестів."""
+
+    def __init__(self) -> None:
+        self.users: dict[UUID, UserResponseDTO] = {}
+
+    def add_user(
+        self,
+        user_id: UUID,
+        *,
+        is_active: bool = True,
+        username: str = "test_user",
+        name: str = "Test User",
+        role_id: UUID | None = None,
+    ) -> UserResponseDTO:
+        dto = UserResponseDTO(
+            id=user_id,
+            version=1,
+            username=username,
+            name=name,
+            role_id=role_id or user_id,
+            created_at=datetime.now(UTC),
+            deleted_at=None if is_active else datetime.now(UTC),
+        )
+        self.users[user_id] = dto
+        return dto
+
+    async def get_user_by_id(self, user_id: UUID, /) -> UserResponseDTO | None:
+        return self.users.get(user_id)

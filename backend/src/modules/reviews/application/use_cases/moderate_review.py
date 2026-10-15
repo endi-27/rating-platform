@@ -4,7 +4,6 @@ from src.core import IEventBus, IUnitOfWork, logger
 from src.modules.reviews.domain.events import ReviewUpdatedEvent
 from src.modules.reviews.domain.exceptions import ReviewNotFoundException
 from src.modules.reviews.domain.interfaces import IReviewRepository, ITargetRatingRepository
-from src.modules.reviews.domain.models import Review
 
 
 class ModerateReviewUseCase:
@@ -22,7 +21,7 @@ class ModerateReviewUseCase:
         self._rating_repo = rating_repo
         self._event_bus = event_bus
 
-    async def execute(self, *, review_id: UUID, action: str) -> Review:
+    async def execute(self, *, review_id: UUID, action: str) -> UUID:
         async with self._uow:
             review = await self._review_repo.get_by_id(review_id)
             if review is None or not review.is_active:
@@ -64,4 +63,4 @@ class ModerateReviewUseCase:
             action=action,
             status=review.status,
         )
-        return review
+        return review.id

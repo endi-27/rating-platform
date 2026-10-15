@@ -16,19 +16,22 @@ async def test_database_connection(db_session: AsyncSession) -> None:
 
 @pytest.mark.asyncio
 async def test_database_seeded_roles(db_session: AsyncSession) -> None:
-    """Перевірка наявності двох системних ролей (SUPER_ADMIN та VIEWER) після міграцій."""
+    """Перевірка наявності трьох системних ролей (SUPER_ADMIN, ADMIN та USER) після міграцій."""
     stmt = select(RoleModel)
     result = await db_session.execute(stmt)
     roles = {r.code: r for r in result.scalars().all()}
 
     assert SystemRole.SUPER_ADMIN.value in roles
-    assert SystemRole.VIEWER.value in roles
+    assert SystemRole.ADMIN.value in roles
+    assert SystemRole.USER.value in roles
 
     super_admin_role = roles[SystemRole.SUPER_ADMIN.value]
-    viewer_role = roles[SystemRole.VIEWER.value]
+    admin_role = roles[SystemRole.ADMIN.value]
+    user_role = roles[SystemRole.USER.value]
 
     assert super_admin_role.name == "Головний адміністратор"
-    assert viewer_role.name == "Глядач"
+    assert admin_role.name == "Адміністратор"
+    assert user_role.name == "Користувач"
 
 
 @pytest.mark.asyncio
@@ -37,9 +40,9 @@ async def test_database_transaction_rollback_isolation(db_session: AsyncSession)
     Перевірка ізоляції транзакції тесту:
     створення запису в db_session не повинно зберігатися у глобальній БД завдяки savepoint.
     """
-    stmt = select(RoleModel).where(RoleModel.code == SystemRole.VIEWER.value)
+    stmt = select(RoleModel).where(RoleModel.code == SystemRole.USER.value)
     result = await db_session.execute(stmt)
-    viewer_role = result.scalar_one()
+    user_role = result.scalar_one()
 
     test_user = UserModel(
         id=uuid7(),
@@ -47,7 +50,7 @@ async def test_database_transaction_rollback_isolation(db_session: AsyncSession)
         username="temp_isolated_test_user",
         name="Temporary Test User",
         password_hash="some_hashed_val",
-        role_id=viewer_role.id,
+        role_id=user_role.id,
     )
     db_session.add(test_user)
     await db_session.flush()

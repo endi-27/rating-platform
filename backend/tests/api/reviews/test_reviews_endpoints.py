@@ -11,7 +11,7 @@ from src.modules.users.infrastructure.models import RoleModel, UserModel
 
 async def _create_user(
     db_session: AsyncSession,
-    viewer_role: RoleModel,
+    user_role: RoleModel,
     prefix: str = "rev_user",
 ) -> UserModel:
     user = UserModel(
@@ -20,7 +20,7 @@ async def _create_user(
         username=f"{prefix}_{uuid7().hex[:6]}",
         name="Reviewer User",
         password_hash=default_password_hasher.hash("TestPass123!"),
-        role_id=viewer_role.id,
+        role_id=user_role.id,
     )
     db_session.add(user)
     await db_session.flush()
@@ -31,7 +31,7 @@ async def test_create_review_happy_path(
     api_client: AsyncClient,
     superadmin_cookies: dict[str, str],
     db_session: AsyncSession,
-    viewer_role: RoleModel,
+    user_role: RoleModel,
     auth_cookies_factory: Callable[[dict[str, Any] | None], dict[str, str]],
 ) -> None:
     # 1. Створюємо Target
@@ -45,8 +45,8 @@ async def test_create_review_happy_path(
     target_id = target_resp.json()["id"]
 
     # 2. Звичайний зареєстрований користувач створює відгук
-    user = await _create_user(db_session, viewer_role)
-    user_cookies = auth_cookies_factory({"sub": str(user.id), "role": "viewer"})
+    user = await _create_user(db_session, user_role)
+    user_cookies = auth_cookies_factory({"sub": str(user.id), "role": "user"})
 
     review_payload = {
         "score": 5,
@@ -87,6 +87,28 @@ async def test_create_review_unauthorized(
     assert response.status_code == 401
 
 
+async def test_create_review_forbidden(
+    api_client: AsyncClient,
+    superadmin_cookies: dict[str, str],
+    no_permissions_cookies: dict[str, str],
+) -> None:
+    slug = f"target-{uuid7().hex[:8]}"
+    target_resp = await api_client.post(
+        "/api/v1/targets",
+        json={"slug": slug, "title": "Target Forbidden", "category": "book"},
+        cookies=superadmin_cookies,
+    )
+    target_id = target_resp.json()["id"]
+
+    response = await api_client.post(
+        f"/api/v1/targets/{target_id}/reviews",
+        json={"score": 4, "content": "Attempting to post without reviews:create permission."},
+        cookies=no_permissions_cookies,
+    )
+    assert response.status_code == 403
+    assert response.json()["error_code"] == "FORBIDDEN"
+
+
 async def test_create_review_target_not_found(
     api_client: AsyncClient,
     superadmin_cookies: dict[str, str],
@@ -103,7 +125,7 @@ async def test_create_review_one_review_rule_conflict(
     api_client: AsyncClient,
     superadmin_cookies: dict[str, str],
     db_session: AsyncSession,
-    viewer_role: RoleModel,
+    user_role: RoleModel,
     auth_cookies_factory: Callable[[dict[str, Any] | None], dict[str, str]],
 ) -> None:
     slug = f"target-{uuid7().hex[:8]}"
@@ -114,8 +136,8 @@ async def test_create_review_one_review_rule_conflict(
     )
     target_id = target_resp.json()["id"]
 
-    user = await _create_user(db_session, viewer_role)
-    user_cookies = auth_cookies_factory({"sub": str(user.id), "role": "viewer"})
+    user = await _create_user(db_session, user_role)
+    user_cookies = auth_cookies_factory({"sub": str(user.id), "role": "user"})
     payload = {"score": 5, "content": "First valid review on the target."}
 
     # Перший відгук успішний
@@ -162,7 +184,7 @@ async def test_get_target_reviews_and_rating(
     api_client: AsyncClient,
     superadmin_cookies: dict[str, str],
     db_session: AsyncSession,
-    viewer_role: RoleModel,
+    user_role: RoleModel,
     auth_cookies_factory: Callable[[dict[str, Any] | None], dict[str, str]],
 ) -> None:
     slug = f"target-{uuid7().hex[:8]}"
@@ -174,8 +196,8 @@ async def test_get_target_reviews_and_rating(
     target_id = target_resp.json()["id"]
 
     # Post review
-    user = await _create_user(db_session, viewer_role)
-    user_cookies = auth_cookies_factory({"sub": str(user.id), "role": "viewer"})
+    user = await _create_user(db_session, user_role)
+    user_cookies = auth_cookies_factory({"sub": str(user.id), "role": "user"})
     await api_client.post(
         f"/api/v1/targets/{target_id}/reviews",
         json={"score": 5, "content": "Excellent horror atmosphere and sound design."},
@@ -201,8 +223,9 @@ async def test_get_target_reviews_and_rating(
 async def test_vote_review_endpoints(
     api_client: AsyncClient,
     superadmin_cookies: dict[str, str],
+    no_permissions_cookies: dict[str, str],
     db_session: AsyncSession,
-    viewer_role: RoleModel,
+    user_role: RoleModel,
     auth_cookies_factory: Callable[[dict[str, Any] | None], dict[str, str]],
 ) -> None:
     slug = f"target-{uuid7().hex[:8]}"
@@ -213,8 +236,8 @@ async def test_vote_review_endpoints(
     )
     target_id = target_resp.json()["id"]
 
-    author = await _create_user(db_session, viewer_role, prefix="author")
-    author_cookies = auth_cookies_factory({"sub": str(author.id), "role": "viewer"})
+    author = await _create_user(db_session, user_role, prefix="author")
+    author_cookies = auth_cookies_factory({"sub": str(author.id), "role": "user"})
 
     rev_resp = await api_client.post(
         f"/api/v1/targets/{target_id}/reviews",
@@ -224,7 +247,23 @@ async def test_vote_review_endpoints(
     assert rev_resp.status_code == 201
     review_id = rev_resp.json()["id"]
 
-    # 1. Author votes for own review -> 409 Conflict
+    # 1. Без автентифікації -> 401 Unauthorized
+    unauth_vote_resp = await api_client.post(
+        f"/api/v1/reviews/{review_id}/vote",
+        json={"is_helpful": True},
+    )
+    assert unauth_vote_resp.status_code == 401
+
+    # 2. Без дозволу reviews:vote -> 403 Forbidden
+    forb_vote_resp = await api_client.post(
+        f"/api/v1/reviews/{review_id}/vote",
+        json={"is_helpful": True},
+        cookies=no_permissions_cookies,
+    )
+    assert forb_vote_resp.status_code == 403
+    assert forb_vote_resp.json()["error_code"] == "FORBIDDEN"
+
+    # 3. Author votes for own review -> 409 Conflict
     self_vote_resp = await api_client.post(
         f"/api/v1/reviews/{review_id}/vote",
         json={"is_helpful": True},
@@ -232,9 +271,9 @@ async def test_vote_review_endpoints(
     )
     assert self_vote_resp.status_code == 409
 
-    # 2. Voter votes helpful -> 200 OK
-    voter = await _create_user(db_session, viewer_role, prefix="voter")
-    voter_cookies = auth_cookies_factory({"sub": str(voter.id), "role": "viewer"})
+    # 4. Voter votes helpful -> 200 OK
+    voter = await _create_user(db_session, user_role, prefix="voter")
+    voter_cookies = auth_cookies_factory({"sub": str(voter.id), "role": "user"})
     vote_resp = await api_client.post(
         f"/api/v1/reviews/{review_id}/vote",
         json={"is_helpful": True},
@@ -243,7 +282,7 @@ async def test_vote_review_endpoints(
     assert vote_resp.status_code == 200
     assert vote_resp.json()["is_helpful"] is True
 
-    # 3. Duplicate vote -> 409 Conflict
+    # 5. Duplicate vote -> 409 Conflict
     dup_vote_resp = await api_client.post(
         f"/api/v1/reviews/{review_id}/vote",
         json={"is_helpful": True},
@@ -251,7 +290,7 @@ async def test_vote_review_endpoints(
     )
     assert dup_vote_resp.status_code == 409
 
-    # 4. Vote for non-existent review -> 404 Not Found
+    # 6. Vote for non-existent review -> 404 Not Found
     not_found_resp = await api_client.post(
         f"/api/v1/reviews/{uuid7()}/vote",
         json={"is_helpful": True},
@@ -265,7 +304,7 @@ async def test_moderate_review_endpoints(
     superadmin_cookies: dict[str, str],
     no_permissions_cookies: dict[str, str],
     db_session: AsyncSession,
-    viewer_role: RoleModel,
+    user_role: RoleModel,
     auth_cookies_factory: Callable[[dict[str, Any] | None], dict[str, str]],
 ) -> None:
     slug = f"target-{uuid7().hex[:8]}"
@@ -276,8 +315,8 @@ async def test_moderate_review_endpoints(
     )
     target_id = target_resp.json()["id"]
 
-    user = await _create_user(db_session, viewer_role, prefix="spammer")
-    user_cookies = auth_cookies_factory({"sub": str(user.id), "role": "viewer"})
+    user = await _create_user(db_session, user_role, prefix="spammer")
+    user_cookies = auth_cookies_factory({"sub": str(user.id), "role": "user"})
     rev_resp = await api_client.post(
         f"/api/v1/targets/{target_id}/reviews",
         json={"score": 1, "content": "Spam review with malicious links and ads."},
@@ -316,7 +355,7 @@ async def test_list_reviews_sorting_and_filters(
     api_client: AsyncClient,
     superadmin_cookies: dict[str, str],
     db_session: AsyncSession,
-    viewer_role: RoleModel,
+    user_role: RoleModel,
     auth_cookies_factory: Callable[[dict[str, Any] | None], dict[str, str]],
 ) -> None:
     slug = f"target-{uuid7().hex[:8]}"
@@ -328,16 +367,16 @@ async def test_list_reviews_sorting_and_filters(
     target_id = target_resp.json()["id"]
 
     # Додаємо два відгуки з різними оцінками
-    u1 = await _create_user(db_session, viewer_role, prefix="user_a")
-    c1 = auth_cookies_factory({"sub": str(u1.id), "role": "viewer"})
+    u1 = await _create_user(db_session, user_role, prefix="user_a")
+    c1 = auth_cookies_factory({"sub": str(u1.id), "role": "user"})
     await api_client.post(
         f"/api/v1/targets/{target_id}/reviews",
         json={"score": 2, "content": "Not very good, could be better."},
         cookies=c1,
     )
 
-    u2 = await _create_user(db_session, viewer_role, prefix="user_b")
-    c2 = auth_cookies_factory({"sub": str(u2.id), "role": "viewer"})
+    u2 = await _create_user(db_session, user_role, prefix="user_b")
+    c2 = auth_cookies_factory({"sub": str(u2.id), "role": "user"})
     await api_client.post(
         f"/api/v1/targets/{target_id}/reviews",
         json={"score": 5, "content": "Absolute perfection, loved every bit!"},

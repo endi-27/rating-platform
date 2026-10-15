@@ -27,8 +27,8 @@ def _make_perm(code: PermissionCode) -> Permission:
 
 
 def _make_role(
-    code: str = SystemRole.VIEWER.value,
-    name: str = "Глядач",
+    code: str = SystemRole.USER.value,
+    name: str = "Користувач",
     is_active: bool = True,
 ) -> Role:
     role = Role(

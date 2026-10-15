@@ -1,13 +1,18 @@
 from uuid import UUID
 
-from src.core import IEventBus, IUnitOfWork, logger
+from src.core import AccountDeactivatedException, IEventBus, IUnitOfWork, logger
 from src.modules.reviews.domain.events import ReviewVotedEvent
 from src.modules.reviews.domain.exceptions import (
     ReviewNotFoundException,
     ReviewVoteAlreadyExistsException,
     SelfReviewVoteForbiddenException,
+    UserNotFoundException,
 )
-from src.modules.reviews.domain.interfaces import IReviewRepository, IReviewVoteRepository
+from src.modules.reviews.domain.interfaces import (
+    IReviewRepository,
+    IReviewVoteRepository,
+    IUserGateway,
+)
 from src.modules.reviews.domain.models import ReviewVote
 
 
@@ -20,11 +25,13 @@ class VoteReviewUseCase:
         review_repo: IReviewRepository,
         vote_repo: IReviewVoteRepository,
         event_bus: IEventBus,
+        user_gateway: IUserGateway,
     ) -> None:
         self._uow = uow
         self._review_repo = review_repo
         self._vote_repo = vote_repo
         self._event_bus = event_bus
+        self._user_gateway = user_gateway
 
     async def execute(
         self,
@@ -32,13 +39,21 @@ class VoteReviewUseCase:
         review_id: UUID,
         user_id: UUID,
         is_helpful: bool,
-    ) -> ReviewVote:
+    ) -> UUID:
         async with self._uow:
+            # 1. Валідація існування та активності користувача, який голосує
+            user = await self._user_gateway.get_user_by_id(user_id)
+            if not user:
+                raise UserNotFoundException(user_id)
+            if user.deleted_at is not None:
+                raise AccountDeactivatedException()
+
+            # 2. Перевірка існування відгуку
             review = await self._review_repo.get_by_id(review_id)
             if review is None or not review.is_active:
                 raise ReviewNotFoundException(review_id)
 
-            # Заборона голосування за власний відгук
+            # 3. Заборона голосування за власний відгук
             if review.user_id == user_id:
                 logger.warning(
                     "Спроба користувача '{user_id}' проголосувати за власний відгук '{review_id}'",
@@ -86,4 +101,4 @@ class VoteReviewUseCase:
                 is_helpful=is_helpful,
             )
         )
-        return vote
+        return vote.id

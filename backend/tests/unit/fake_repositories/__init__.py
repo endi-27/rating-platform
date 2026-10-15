@@ -5,6 +5,7 @@ from tests.unit.fake_repositories.fake_reviews_repositories import (
     FakeReviewVoteRepository,
     FakeTargetRatingRepository,
     FakeTargetRepository,
+    FakeUserGateway,
 )
 from tests.unit.fake_repositories.fake_role_repository import FakeRoleRepository
 from tests.unit.fake_repositories.fake_user_auth_gateway import FakeUserAuthGateway
@@ -19,5 +20,6 @@ __all__ = [
     "FakeTargetRatingRepository",
     "FakeTargetRepository",
     "FakeUserAuthGateway",
+    "FakeUserGateway",
     "FakeUserRepository",
 ]

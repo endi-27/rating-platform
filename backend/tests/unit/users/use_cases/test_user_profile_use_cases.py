@@ -72,7 +72,7 @@ def _make_actor(
     )
 
 
-def _make_role(code: str = SystemRole.VIEWER.value, name: str = "Глядач", is_active: bool = True) -> Role:
+def _make_role(code: str = SystemRole.USER.value, name: str = "Користувач", is_active: bool = True) -> Role:
     role = Role(id=uuid7(), code=code, name=name, permissions=set())
     if not is_active:
         role.soft_delete()

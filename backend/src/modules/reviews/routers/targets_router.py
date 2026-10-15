@@ -10,7 +10,6 @@ from src.core import CurrentUser, PermissionCode, settings
 from src.modules.auth.dependencies import require_permission
 from src.modules.reviews.application.dto import (
     CreateTargetDTO,
-    TargetRatingResponseDTO,
     TargetResponseDTO,
 )
 from src.modules.reviews.application.use_cases import CreateTargetUseCase
@@ -19,44 +18,13 @@ from src.modules.reviews.dependencies import (
     get_target_query_service,
 )
 from src.modules.reviews.domain.exceptions import TargetNotFoundException
-from src.modules.reviews.domain.models import Target, TargetRating
 from src.modules.reviews.queries import (
     TargetFilterDTO,
     TargetQueryService,
     TargetSortField,
 )
 
-router = APIRouter(prefix="/targets", tags=["Об'єкти оцінювання (Targets)"])
-
-
-def _to_target_dto(target: Target, rating: TargetRating | None) -> TargetResponseDTO:
-    rating_dto: TargetRatingResponseDTO | None = None
-    if rating is not None:
-        rating_dto = TargetRatingResponseDTO(
-            total_reviews=rating.total_reviews,
-            average_score=rating.average_score,
-            bayesian_score=rating.bayesian_score,
-            star_1_count=rating.star_1_count,
-            star_2_count=rating.star_2_count,
-            star_3_count=rating.star_3_count,
-            star_4_count=rating.star_4_count,
-            star_5_count=rating.star_5_count,
-            last_calculated_at=rating.last_calculated_at,
-        )
-
-    return TargetResponseDTO(
-        id=target.id,
-        slug=target.slug,
-        title=target.title,
-        category=target.category,
-        description=target.description,
-        metadata=dict(target.metadata),
-        is_active=target.is_active,
-        version=target.version,
-        rating=rating_dto,
-        created_at=target.created_at,
-        updated_at=target.updated_at,
-    )
+router = APIRouter(prefix="/targets", tags=["Targets"])
 
 
 @router.post(
@@ -69,11 +37,14 @@ def _to_target_dto(target: Target, rating: TargetRating | None) -> TargetRespons
 async def create_target(
     payload: CreateTargetDTO,
     use_case: Annotated[CreateTargetUseCase, Depends(get_create_target_uc)],
+    query_service: Annotated[TargetQueryService, Depends(get_target_query_service)],
     current_user: Annotated[CurrentUser, Depends(require_permission(PermissionCode.TARGETS_CREATE))],
 ) -> TargetResponseDTO:
-    target = await use_case.execute(payload, created_by_id=current_user.id)
-    empty_rating = TargetRating.create_empty(target.id)
-    return _to_target_dto(target, empty_rating)
+    target_id = await use_case.execute(payload, created_by_id=current_user.id)
+    target = await query_service.get_by_id(target_id)
+    if target is None:
+        raise TargetNotFoundException(target_id)
+    return target
 
 
 @router.get(

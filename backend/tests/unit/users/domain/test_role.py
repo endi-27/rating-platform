@@ -64,13 +64,13 @@ def test_role_is_super_admin_and_system_role() -> None:
     assert role_admin.is_super_admin is True
     assert role_admin.is_system_role is True
 
-    role_viewer = Role(
+    role_user = Role(
         id=uuid7(),
-        code=SystemRole.VIEWER.value,
-        name="Viewer",
+        code=SystemRole.USER.value,
+        name="User",
     )
-    assert role_viewer.is_super_admin is False
-    assert role_viewer.is_system_role is False
+    assert role_user.is_super_admin is False
+    assert role_user.is_system_role is False
 
 
 def test_role_update_details_success() -> None:

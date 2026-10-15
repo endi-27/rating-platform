@@ -15,7 +15,7 @@ async def test_list_roles_success(
     superadmin_cookies: dict[str, str],
 ) -> None:
     """Перевірка отримання списку ролей (200 OK) з пагінацією, фільтрацією та сортуванням."""
-    # 1. Запит за замовчуванням (super_admin виключений за дизайном, повертається viewer)
+    # 1. Запит за замовчуванням (super_admin виключений за дизайном, повертаються admin та user)
     response = await api_client.get("/api/v1/roles", cookies=superadmin_cookies)
     assert response.status_code == 200
 
@@ -26,19 +26,19 @@ async def test_list_roles_success(
     assert "page_size" in data
     assert data["total"] >= 1
     codes = [r["code"] for r in data["items"]]
-    assert "viewer" in codes
+    assert "user" in codes
 
     # 2. Фільтрація за пошуковим словом search
-    search_resp = await api_client.get("/api/v1/roles?search=viewer", cookies=superadmin_cookies)
+    search_resp = await api_client.get("/api/v1/roles?search=user", cookies=superadmin_cookies)
     assert search_resp.status_code == 200
     search_items = search_resp.json()["items"]
-    assert any(r["code"] == "viewer" for r in search_items)
+    assert any(r["code"] == "user" for r in search_items)
 
     # 3. Фільтрація за кодами
-    codes_resp = await api_client.get("/api/v1/roles?codes=viewer", cookies=superadmin_cookies)
+    codes_resp = await api_client.get("/api/v1/roles?codes=user", cookies=superadmin_cookies)
     assert codes_resp.status_code == 200
     assert len(codes_resp.json()["items"]) == 1
-    assert codes_resp.json()["items"][0]["code"] == "viewer"
+    assert codes_resp.json()["items"][0]["code"] == "user"
 
     # 4. Сортування за назвою
     sort_resp = await api_client.get("/api/v1/roles?sort=name&page=1&page_size=10", cookies=superadmin_cookies)
@@ -77,7 +77,7 @@ async def test_get_role_by_id_endpoints(
     assert resp_200.status_code == 200
     data = resp_200.json()
     assert data["id"] == str(viewer_role.id)
-    assert data["code"] == "viewer"
+    assert data["code"] == "user"
     assert "permissions" in data
 
     # 2. 404 Not Found

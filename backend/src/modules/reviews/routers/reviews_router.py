@@ -7,7 +7,7 @@ from fastapi_cache.decorator import cache
 from src.api.schemas.pagination import PaginatedResponse, PaginationParams
 from src.api.schemas.sorting import MultiSort, sort_dependency
 from src.core import CurrentUser, PermissionCode, settings
-from src.modules.auth.dependencies import get_current_user, require_permission
+from src.modules.auth.dependencies import require_permission
 from src.modules.reviews.application.dto import (
     CreateReviewDTO,
     ModerateReviewDTO,
@@ -27,8 +27,10 @@ from src.modules.reviews.dependencies import (
     get_target_query_service,
     get_vote_review_uc,
 )
-from src.modules.reviews.domain.exceptions import TargetNotFoundException
-from src.modules.reviews.domain.models import Review
+from src.modules.reviews.domain.exceptions import (
+    ReviewNotFoundException,
+    TargetNotFoundException,
+)
 from src.modules.reviews.queries import (
     ReviewFilterDTO,
     ReviewQueryService,
@@ -36,24 +38,7 @@ from src.modules.reviews.queries import (
     TargetQueryService,
 )
 
-router = APIRouter(tags=["Відгуки та рейтинги (Reviews & Ratings)"])
-
-
-def _to_review_dto(review: Review) -> ReviewResponseDTO:
-    return ReviewResponseDTO(
-        id=review.id,
-        target_id=review.target_id,
-        user_id=review.user_id,
-        score=review.score,
-        title=review.title,
-        content=review.content,
-        status=review.status,
-        helpful_count=review.helpful_count,
-        unhelpful_count=review.unhelpful_count,
-        version=review.version,
-        created_at=review.created_at,
-        updated_at=review.updated_at,
-    )
+router = APIRouter(tags=["Reviews & Ratings"])
 
 
 @router.post(
@@ -67,14 +52,18 @@ async def create_review(
     target_id: UUID,
     payload: CreateReviewDTO,
     use_case: Annotated[CreateReviewUseCase, Depends(get_create_review_uc)],
-    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+    review_queries: Annotated[ReviewQueryService, Depends(get_review_query_service)],
+    current_user: Annotated[CurrentUser, Depends(require_permission(PermissionCode.REVIEWS_CREATE))],
 ) -> ReviewResponseDTO:
-    review = await use_case.execute(
+    review_id = await use_case.execute(
         target_id=target_id,
         user_id=current_user.id,
         dto=payload,
     )
-    return _to_review_dto(review)
+    review = await review_queries.get_by_id(review_id)
+    if review is None:
+        raise ReviewNotFoundException(review_id)
+    return review
 
 
 @router.get(
@@ -143,17 +132,17 @@ async def vote_review(
     review_id: UUID,
     payload: VoteReviewDTO,
     use_case: Annotated[VoteReviewUseCase, Depends(get_vote_review_uc)],
-    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+    current_user: Annotated[CurrentUser, Depends(require_permission(PermissionCode.REVIEWS_VOTE))],
 ) -> dict[str, Any]:
-    vote = await use_case.execute(
+    vote_id = await use_case.execute(
         review_id=review_id,
         user_id=current_user.id,
         is_helpful=payload.is_helpful,
     )
     return {
-        "vote_id": str(vote.id),
-        "review_id": str(vote.review_id),
-        "is_helpful": vote.is_helpful,
+        "vote_id": str(vote_id),
+        "review_id": str(review_id),
+        "is_helpful": payload.is_helpful,
     }
 
 
@@ -167,10 +156,14 @@ async def moderate_review(
     review_id: UUID,
     payload: ModerateReviewDTO,
     use_case: Annotated[ModerateReviewUseCase, Depends(get_moderate_review_uc)],
+    review_queries: Annotated[ReviewQueryService, Depends(get_review_query_service)],
     current_user: Annotated[CurrentUser, Depends(require_permission(PermissionCode.REVIEWS_MODERATE))],
 ) -> ReviewResponseDTO:
-    review = await use_case.execute(
+    await use_case.execute(
         review_id=review_id,
         action=payload.action,
     )
-    return _to_review_dto(review)
+    review = await review_queries.get_by_id(review_id)
+    if review is None:
+        raise ReviewNotFoundException(review_id)
+    return review

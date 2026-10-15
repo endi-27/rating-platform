@@ -1,10 +1,17 @@
 from uuid import UUID
 
-from src.core import IEventBus, IUnitOfWork, logger
+from src.core import AccountDeactivatedException, IEventBus, IUnitOfWork, logger
 from src.modules.reviews.application.dto import CreateTargetDTO
 from src.modules.reviews.domain.events import TargetCreatedEvent
-from src.modules.reviews.domain.exceptions import TargetSlugAlreadyExistsException
-from src.modules.reviews.domain.interfaces import ITargetRatingRepository, ITargetRepository
+from src.modules.reviews.domain.exceptions import (
+    TargetSlugAlreadyExistsException,
+    UserNotFoundException,
+)
+from src.modules.reviews.domain.interfaces import (
+    ITargetRatingRepository,
+    ITargetRepository,
+    IUserGateway,
+)
 from src.modules.reviews.domain.models import Target, TargetRating
 
 
@@ -17,20 +24,30 @@ class CreateTargetUseCase:
         target_repo: ITargetRepository,
         rating_repo: ITargetRatingRepository,
         event_bus: IEventBus,
+        user_gateway: IUserGateway,
     ) -> None:
         self._uow = uow
         self._target_repo = target_repo
         self._rating_repo = rating_repo
         self._event_bus = event_bus
+        self._user_gateway = user_gateway
 
-    async def execute(self, dto: CreateTargetDTO, *, created_by_id: UUID | None = None) -> Target:
+    async def execute(self, dto: CreateTargetDTO, *, created_by_id: UUID | None = None) -> UUID:
         async with self._uow:
-            # 1. Перевірка унікальності слага
+            # 1. Валідація існування та активності автора, якщо вказаний
+            if created_by_id is not None:
+                user = await self._user_gateway.get_user_by_id(created_by_id)
+                if not user:
+                    raise UserNotFoundException(created_by_id)
+                if user.deleted_at is not None:
+                    raise AccountDeactivatedException()
+
+            # 2. Перевірка унікальності слага
             if await self._target_repo.exists_by_slug(dto.slug):
                 logger.warning("Спроба створення дубліката Target зі slug='{slug}'", slug=dto.slug)
                 raise TargetSlugAlreadyExistsException(dto.slug)
 
-            # 2. Створення доменного агрегата Target
+            # 3. Створення доменного агрегата Target
             target = Target.create(
                 slug=dto.slug,
                 title=dto.title,
@@ -41,13 +58,13 @@ class CreateTargetUseCase:
             )
             await self._target_repo.save(target)
 
-            # 3. Створення початкового порожнього агрегату рейтингу (1:1)
+            # 4. Створення початкового порожнього агрегату рейтингу (1:1)
             rating = TargetRating.create_empty(target.id)
             await self._rating_repo.save(rating)
 
             await self._uow.commit()
 
-        # 4. Публікація доменної події
+        # 5. Публікація доменної події
         await self._event_bus.publish(
             TargetCreatedEvent(
                 target_id=target.id,
@@ -56,4 +73,4 @@ class CreateTargetUseCase:
             )
         )
         logger.info("Створено новий Target id='{id}', slug='{slug}'", id=str(target.id), slug=target.slug)
-        return target
+        return target.id

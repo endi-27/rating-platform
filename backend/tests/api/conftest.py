@@ -118,9 +118,25 @@ def superadmin_cookies(
 
 
 @pytest.fixture
-async def viewer_role(db_session: AsyncSession) -> RoleModel:
-    """Отримання базової системної ролі глядача (viewer)."""
-    stmt = select(RoleModel).where(RoleModel.code == SystemRole.VIEWER.value)
+async def user_role(db_session: AsyncSession) -> RoleModel:
+    """Отримання базової системної ролі користувача (user)."""
+    stmt = select(RoleModel).where(RoleModel.code == SystemRole.USER.value)
+    res = await db_session.execute(stmt)
+    role = res.scalar_one()
+    db_session.expunge(role)
+    return role
+
+
+@pytest.fixture
+def viewer_role(user_role: RoleModel) -> RoleModel:
+    """Аліас для зворотної сумісності з тестами (viewer_role -> user_role)."""
+    return user_role
+
+
+@pytest.fixture
+async def admin_role(db_session: AsyncSession) -> RoleModel:
+    """Отримання системної ролі адміністратора (admin)."""
+    stmt = select(RoleModel).where(RoleModel.code == SystemRole.ADMIN.value)
     res = await db_session.execute(stmt)
     role = res.scalar_one()
     db_session.expunge(role)
@@ -197,4 +213,4 @@ def admin_cookies(
     admin_user_with_permissions: UserModel,
 ) -> dict[str, str]:
     """Cookies авторизованого користувача з усіма правами (не super_admin)."""
-    return auth_cookies_factory({"sub": str(admin_user_with_permissions.id), "role": "viewer"})
+    return auth_cookies_factory({"sub": str(admin_user_with_permissions.id), "role": "admin"})

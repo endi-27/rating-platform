@@ -1,8 +1,10 @@
 from decimal import Decimal
+from uuid import UUID
 
 import pytest
 from uuid6 import uuid7
 
+from src.core import AccountDeactivatedException
 from src.modules.reviews.application.dto import CreateReviewDTO
 from src.modules.reviews.application.use_cases import (
     CreateReviewUseCase,
@@ -20,6 +22,7 @@ from src.modules.reviews.domain.exceptions import (
     ReviewVoteAlreadyExistsException,
     SelfReviewVoteForbiddenException,
     TargetNotFoundException,
+    UserNotFoundException,
 )
 from src.modules.reviews.domain.models import Review, Target, TargetRating
 from tests.unit.fake_repositories import (
@@ -27,6 +30,7 @@ from tests.unit.fake_repositories import (
     FakeReviewVoteRepository,
     FakeTargetRatingRepository,
     FakeTargetRepository,
+    FakeUserGateway,
 )
 from tests.unit.fakes import FakeEventBus, FakeUnitOfWork
 
@@ -61,17 +65,26 @@ def event_bus() -> FakeEventBus:
     return FakeEventBus()
 
 
+@pytest.fixture
+def user_gateway() -> FakeUserGateway:
+    return FakeUserGateway()
+
+
 async def test_create_review_happy_path(
     uow: FakeUnitOfWork,
     target_repo: FakeTargetRepository,
     rating_repo: FakeTargetRatingRepository,
     review_repo: FakeReviewRepository,
     event_bus: FakeEventBus,
+    user_gateway: FakeUserGateway,
 ) -> None:
     target = Target.create(slug="fight-club-1999", title="Fight Club", category="movie")
     await target_repo.save(target)
     rating = TargetRating.create_empty(target.id)
     await rating_repo.save(rating)
+
+    user_id = uuid7()
+    user_gateway.add_user(user_id)
 
     use_case = CreateReviewUseCase(
         uow=uow,
@@ -79,22 +92,24 @@ async def test_create_review_happy_path(
         rating_repo=rating_repo,
         review_repo=review_repo,
         event_bus=event_bus,
+        user_gateway=user_gateway,
     )
 
-    user_id = uuid7()
     dto = CreateReviewDTO(
         score=5,
         title="First rule of Fight Club",
         content="The first rule of Fight Club is: you do not talk about Fight Club.",
     )
 
-    review = await use_case.execute(
+    review_id = await use_case.execute(
         target_id=target.id,
         user_id=user_id,
         dto=dto,
     )
 
-    assert review.id is not None
+    assert isinstance(review_id, UUID)
+    review = await review_repo.get_by_id(review_id)
+    assert review is not None
     assert review.target_id == target.id
     assert review.user_id == user_id
     assert review.score == 5
@@ -109,7 +124,7 @@ async def test_create_review_happy_path(
     # Event published
     events = event_bus.get_events_of_type(ReviewCreatedEvent)
     assert len(events) == 1
-    assert events[0].review_id == review.id
+    assert events[0].review_id == review_id
     assert events[0].target_id == target.id
 
 
@@ -119,20 +134,25 @@ async def test_create_review_target_not_found(
     rating_repo: FakeTargetRatingRepository,
     review_repo: FakeReviewRepository,
     event_bus: FakeEventBus,
+    user_gateway: FakeUserGateway,
 ) -> None:
+    user_id = uuid7()
+    user_gateway.add_user(user_id)
+
     use_case = CreateReviewUseCase(
         uow=uow,
         target_repo=target_repo,
         rating_repo=rating_repo,
         review_repo=review_repo,
         event_bus=event_bus,
+        user_gateway=user_gateway,
     )
 
     dto = CreateReviewDTO(score=4, content="Valid review text for testing purposes.")
     with pytest.raises(TargetNotFoundException):
         await use_case.execute(
             target_id=uuid7(),
-            user_id=uuid7(),
+            user_id=user_id,
             dto=dto,
         )
 
@@ -143,11 +163,14 @@ async def test_create_review_duplicate_raises_exception(
     rating_repo: FakeTargetRatingRepository,
     review_repo: FakeReviewRepository,
     event_bus: FakeEventBus,
+    user_gateway: FakeUserGateway,
 ) -> None:
     target = Target.create(slug="matrix", title="The Matrix", category="movie")
     await target_repo.save(target)
 
     user_id = uuid7()
+    user_gateway.add_user(user_id)
+
     existing = Review.create(
         target_id=target.id,
         user_id=user_id,
@@ -162,10 +185,72 @@ async def test_create_review_duplicate_raises_exception(
         rating_repo=rating_repo,
         review_repo=review_repo,
         event_bus=event_bus,
+        user_gateway=user_gateway,
     )
 
     dto = CreateReviewDTO(score=4, content="Attempting second review from same user.")
     with pytest.raises(ReviewAlreadyExistsException):
+        await use_case.execute(
+            target_id=target.id,
+            user_id=user_id,
+            dto=dto,
+        )
+
+
+async def test_create_review_author_not_found(
+    uow: FakeUnitOfWork,
+    target_repo: FakeTargetRepository,
+    rating_repo: FakeTargetRatingRepository,
+    review_repo: FakeReviewRepository,
+    event_bus: FakeEventBus,
+    user_gateway: FakeUserGateway,
+) -> None:
+    target = Target.create(slug="avatar", title="Avatar", category="movie")
+    await target_repo.save(target)
+
+    use_case = CreateReviewUseCase(
+        uow=uow,
+        target_repo=target_repo,
+        rating_repo=rating_repo,
+        review_repo=review_repo,
+        event_bus=event_bus,
+        user_gateway=user_gateway,
+    )
+
+    dto = CreateReviewDTO(score=5, content="Valid text for non-existent author test.")
+    with pytest.raises(UserNotFoundException):
+        await use_case.execute(
+            target_id=target.id,
+            user_id=uuid7(),
+            dto=dto,
+        )
+
+
+async def test_create_review_author_deactivated(
+    uow: FakeUnitOfWork,
+    target_repo: FakeTargetRepository,
+    rating_repo: FakeTargetRatingRepository,
+    review_repo: FakeReviewRepository,
+    event_bus: FakeEventBus,
+    user_gateway: FakeUserGateway,
+) -> None:
+    target = Target.create(slug="titanic", title="Titanic", category="movie")
+    await target_repo.save(target)
+
+    user_id = uuid7()
+    user_gateway.add_user(user_id, is_active=False)
+
+    use_case = CreateReviewUseCase(
+        uow=uow,
+        target_repo=target_repo,
+        rating_repo=rating_repo,
+        review_repo=review_repo,
+        event_bus=event_bus,
+        user_gateway=user_gateway,
+    )
+
+    dto = CreateReviewDTO(score=5, content="Valid text for deactivated author test.")
+    with pytest.raises(AccountDeactivatedException):
         await use_case.execute(
             target_id=target.id,
             user_id=user_id,
@@ -178,10 +263,14 @@ async def test_vote_review_use_case(
     review_repo: FakeReviewRepository,
     vote_repo: FakeReviewVoteRepository,
     event_bus: FakeEventBus,
+    user_gateway: FakeUserGateway,
 ) -> None:
     author_id = uuid7()
     voter_id = uuid7()
     target_id = uuid7()
+
+    user_gateway.add_user(author_id)
+    user_gateway.add_user(voter_id)
 
     review = Review.create(
         target_id=target_id,
@@ -196,6 +285,7 @@ async def test_vote_review_use_case(
         review_repo=review_repo,
         vote_repo=vote_repo,
         event_bus=event_bus,
+        user_gateway=user_gateway,
     )
 
     # 1. Author votes for own review -> Forbidden
@@ -207,11 +297,14 @@ async def test_vote_review_use_case(
         )
 
     # 2. Voter votes helpful -> success
-    vote = await use_case.execute(
+    vote_id = await use_case.execute(
         review_id=review.id,
         user_id=voter_id,
         is_helpful=True,
     )
+    assert isinstance(vote_id, UUID)
+    vote = await vote_repo.get_by_review_and_user(review.id, voter_id)
+    assert vote is not None
     assert vote.is_helpful is True
     assert review.helpful_count == 1
     assert uow.committed is True
@@ -225,11 +318,14 @@ async def test_vote_review_use_case(
         )
 
     # 4. Voter changes vote to unhelpful -> switches vote
-    changed_vote = await use_case.execute(
+    changed_vote_id = await use_case.execute(
         review_id=review.id,
         user_id=voter_id,
         is_helpful=False,
     )
+    assert changed_vote_id == vote.id
+    changed_vote = await vote_repo.get_by_review_and_user(review.id, voter_id)
+    assert changed_vote is not None
     assert changed_vote.is_helpful is False
     assert review.helpful_count == 0
     assert review.unhelpful_count == 1
@@ -240,6 +336,14 @@ async def test_vote_review_use_case(
         await use_case.execute(
             review_id=uuid7(),
             user_id=voter_id,
+            is_helpful=True,
+        )
+
+    # 6. Non-existent voter -> UserNotFoundException
+    with pytest.raises(UserNotFoundException):
+        await use_case.execute(
+            review_id=review.id,
+            user_id=uuid7(),
             is_helpful=True,
         )
 
@@ -273,17 +377,24 @@ async def test_moderate_review_use_case(
     )
 
     # 1. Action: hide -> review status hidden, rating deducted
-    mod_review = await use_case.execute(review_id=review.id, action="hide")
+    mod_id = await use_case.execute(review_id=review.id, action="hide")
+    assert isinstance(mod_id, UUID)
+    mod_review = await review_repo.get_by_id(mod_id)
+    assert mod_review is not None
     assert mod_review.status == "hidden"
     assert rating.total_reviews == 0
 
     # 2. Action: publish -> review restored, rating added back
-    pub_review = await use_case.execute(review_id=review.id, action="publish")
+    pub_id = await use_case.execute(review_id=review.id, action="publish")
+    pub_review = await review_repo.get_by_id(pub_id)
+    assert pub_review is not None
     assert pub_review.status == "published"
     assert rating.total_reviews == 1
 
     # 3. Action: flag -> review marked flagged
-    flag_review = await use_case.execute(review_id=review.id, action="flag")
+    flag_id = await use_case.execute(review_id=review.id, action="flag")
+    flag_review = await review_repo.get_by_id(flag_id)
+    assert flag_review is not None
     assert flag_review.status == "flagged"
 
     # Event was published

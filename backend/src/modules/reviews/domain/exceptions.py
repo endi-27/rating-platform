@@ -80,3 +80,16 @@ class ReviewVoteAlreadyExistsException(ConflictException):
 
     default_error_code = "REVIEW_VOTE_ALREADY_EXISTS"
     default_message = "Ви вже віддали свій голос за цей відгук."
+
+
+class UserNotFoundException(NotFoundException):
+    """Користувача не знайдено в системі."""
+
+    default_error_code = "USER_NOT_FOUND"
+    default_message = "Користувача не знайдено."
+
+    def __init__(self, user_id: UUID) -> None:
+        super().__init__(
+            message=f"Користувача з ID '{user_id}' не знайдено.",
+            details={"user_id": str(user_id)},
+        )
