@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, Query, status
 from fastapi_cache.decorator import cache
 
 from src.api.schemas.pagination import PaginatedResponse, PaginationParams
+from src.api.schemas.sorting import MultiSort, sort_dependency
 from src.core import CurrentUser, PermissionCode, settings
 from src.modules.auth.dependencies import get_current_user, require_permission
 from src.modules.reviews.application.dto import (
@@ -16,20 +17,24 @@ from src.modules.reviews.application.dto import (
 )
 from src.modules.reviews.application.use_cases import (
     CreateReviewUseCase,
-    GetTargetDetailsUseCase,
-    ListTargetReviewsUseCase,
     ModerateReviewUseCase,
     VoteReviewUseCase,
 )
 from src.modules.reviews.dependencies import (
     get_create_review_uc,
-    get_list_target_reviews_uc,
     get_moderate_review_uc,
-    get_target_details_uc,
+    get_review_query_service,
+    get_target_query_service,
     get_vote_review_uc,
 )
 from src.modules.reviews.domain.exceptions import TargetNotFoundException
 from src.modules.reviews.domain.models import Review
+from src.modules.reviews.queries import (
+    ReviewFilterDTO,
+    ReviewQueryService,
+    ReviewSortField,
+    TargetQueryService,
+)
 
 router = APIRouter(tags=["Відгуки та рейтинги (Reviews & Ratings)"])
 
@@ -76,23 +81,39 @@ async def create_review(
     "/targets/{target_id}/reviews",
     response_model=PaginatedResponse[ReviewResponseDTO],
     summary="Стрічка відгуків об'єкта",
-    description="Публічний перегляд опублікованих відгуків об'єкта з пагінацією (фільтрація за target_id).",
+    description="Публічний перегляд опублікованих відгуків об'єкта (CQRS Read з шардингом за target_id).",
 )
 async def list_target_reviews(
     target_id: UUID,
-    use_case: Annotated[ListTargetReviewsUseCase, Depends(get_list_target_reviews_uc)],
-    page: Annotated[int, Query(ge=1, description="Номер сторінки")] = 1,
-    page_size: Annotated[int, Query(ge=1, le=100, description="Розмір сторінки")] = 20,
+    pagination: Annotated[PaginationParams, Depends()],
+    sort: Annotated[
+        MultiSort[ReviewSortField],
+        Depends(sort_dependency(ReviewSortField, default=("-created_at",), max_fields=2)),
+    ],
+    review_queries: Annotated[ReviewQueryService, Depends(get_review_query_service)],
+    target_queries: Annotated[TargetQueryService, Depends(get_target_query_service)],
+    score: Annotated[int | None, Query(ge=1, le=5, description="Фільтр за оцінкою")] = None,
+    status_filter: Annotated[str, Query(alias="status", description="Статус модерації")] = "published",
+    author_id: Annotated[UUID | None, Query(description="Фільтр за автором відгуку")] = None,
 ) -> PaginatedResponse[ReviewResponseDTO]:
-    pagination = PaginationParams(page=page, page_size=page_size)
-    reviews, total = await use_case.execute(
+    # 1. Перевірка існування об'єкта
+    target = await target_queries.get_by_id(target_id)
+    if target is None:
+        raise TargetNotFoundException(target_id)
+
+    # 2. Вибірка відгуків через Query Service
+    filters = ReviewFilterDTO(
         target_id=target_id,
-        status="published",
-        page=page,
-        page_size=page_size,
+        status=status_filter,
+        score=score,
+        author_id=author_id,
     )
-    dto_items = [_to_review_dto(r) for r in reviews]
-    return PaginatedResponse.create(items=dto_items, total=total, pagination=pagination)
+    return await review_queries.list_by_target(
+        target_id=target_id,
+        pagination=pagination,
+        sort=sort,
+        filters=filters,
+    )
 
 
 @router.get(
@@ -104,23 +125,12 @@ async def list_target_reviews(
 @cache(expire=3600, namespace=settings.cache.namespace.reviews)
 async def get_target_rating(
     target_id: UUID,
-    use_case: Annotated[GetTargetDetailsUseCase, Depends(get_target_details_uc)],
+    target_queries: Annotated[TargetQueryService, Depends(get_target_query_service)],
 ) -> TargetRatingResponseDTO:
-    target, rating = await use_case.execute(target_id)
+    rating = await target_queries.get_target_rating(target_id)
     if rating is None:
         raise TargetNotFoundException(target_id)
-
-    return TargetRatingResponseDTO(
-        total_reviews=rating.total_reviews,
-        average_score=rating.average_score,
-        bayesian_score=rating.bayesian_score,
-        star_1_count=rating.star_1_count,
-        star_2_count=rating.star_2_count,
-        star_3_count=rating.star_3_count,
-        star_4_count=rating.star_4_count,
-        star_5_count=rating.star_5_count,
-        last_calculated_at=rating.last_calculated_at,
-    )
+    return rating
 
 
 @router.post(

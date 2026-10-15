@@ -310,3 +310,58 @@ async def test_moderate_review_endpoints(
         cookies=superadmin_cookies,
     )
     assert inv_resp.status_code == 422
+
+
+async def test_list_reviews_sorting_and_filters(
+    api_client: AsyncClient,
+    superadmin_cookies: dict[str, str],
+    db_session: AsyncSession,
+    viewer_role: RoleModel,
+    auth_cookies_factory: Callable[[dict[str, Any] | None], dict[str, str]],
+) -> None:
+    slug = f"target-{uuid7().hex[:8]}"
+    target_resp = await api_client.post(
+        "/api/v1/targets",
+        json={"slug": slug, "title": "Reviews Sorting Target", "category": "books"},
+        cookies=superadmin_cookies,
+    )
+    target_id = target_resp.json()["id"]
+
+    # Додаємо два відгуки з різними оцінками
+    u1 = await _create_user(db_session, viewer_role, prefix="user_a")
+    c1 = auth_cookies_factory({"sub": str(u1.id), "role": "viewer"})
+    await api_client.post(
+        f"/api/v1/targets/{target_id}/reviews",
+        json={"score": 2, "content": "Not very good, could be better."},
+        cookies=c1,
+    )
+
+    u2 = await _create_user(db_session, viewer_role, prefix="user_b")
+    c2 = auth_cookies_factory({"sub": str(u2.id), "role": "viewer"})
+    await api_client.post(
+        f"/api/v1/targets/{target_id}/reviews",
+        json={"score": 5, "content": "Absolute perfection, loved every bit!"},
+        cookies=c2,
+    )
+
+    # 1. Сортування за оцінкою desc
+    resp_desc = await api_client.get(f"/api/v1/targets/{target_id}/reviews", params={"sort": "-score"})
+    assert resp_desc.status_code == 200
+    scores_desc = [r["score"] for r in resp_desc.json()["items"]]
+    assert scores_desc == [5, 2]
+
+    # 2. Сортування за оцінкою asc
+    resp_asc = await api_client.get(f"/api/v1/targets/{target_id}/reviews", params={"sort": "score"})
+    assert resp_asc.status_code == 200
+    scores_asc = [r["score"] for r in resp_asc.json()["items"]]
+    assert scores_asc == [2, 5]
+
+    # 3. Фільтр за score=5
+    resp_filt = await api_client.get(f"/api/v1/targets/{target_id}/reviews", params={"score": 5})
+    assert resp_filt.status_code == 200
+    assert resp_filt.json()["total"] == 1
+    assert resp_filt.json()["items"][0]["score"] == 5
+
+    # 4. Невалідне поле сортування -> 422
+    resp_inv = await api_client.get(f"/api/v1/targets/{target_id}/reviews", params={"sort": "hack_column"})
+    assert resp_inv.status_code == 422

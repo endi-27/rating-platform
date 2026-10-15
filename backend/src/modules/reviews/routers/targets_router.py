@@ -1,10 +1,11 @@
+from decimal import Decimal
 from typing import Annotated
-from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query, status
 from fastapi_cache.decorator import cache
 
 from src.api.schemas.pagination import PaginatedResponse, PaginationParams
+from src.api.schemas.sorting import MultiSort, sort_dependency
 from src.core import CurrentUser, PermissionCode, settings
 from src.modules.auth.dependencies import require_permission
 from src.modules.reviews.application.dto import (
@@ -12,17 +13,18 @@ from src.modules.reviews.application.dto import (
     TargetRatingResponseDTO,
     TargetResponseDTO,
 )
-from src.modules.reviews.application.use_cases import (
-    CreateTargetUseCase,
-    GetTargetDetailsUseCase,
-    ListTargetsUseCase,
-)
+from src.modules.reviews.application.use_cases import CreateTargetUseCase
 from src.modules.reviews.dependencies import (
     get_create_target_uc,
-    get_list_targets_uc,
-    get_target_details_uc,
+    get_target_query_service,
 )
+from src.modules.reviews.domain.exceptions import TargetNotFoundException
 from src.modules.reviews.domain.models import Target, TargetRating
+from src.modules.reviews.queries import (
+    TargetFilterDTO,
+    TargetQueryService,
+    TargetSortField,
+)
 
 router = APIRouter(prefix="/targets", tags=["Об'єкти оцінювання (Targets)"])
 
@@ -70,7 +72,6 @@ async def create_target(
     current_user: Annotated[CurrentUser, Depends(require_permission(PermissionCode.TARGETS_CREATE))],
 ) -> TargetResponseDTO:
     target = await use_case.execute(payload, created_by_id=current_user.id)
-    # Початковий рейтинг новий і порожній
     empty_rating = TargetRating.create_empty(target.id)
     return _to_target_dto(target, empty_rating)
 
@@ -79,24 +80,26 @@ async def create_target(
     "",
     response_model=PaginatedResponse[TargetResponseDTO],
     summary="Каталог об'єктів оцінювання",
-    description="Публічний перегляд списку об'єктів із фільтрацією за категорією/пошуком та пагінацією.",
+    description="Публічний перегляд списку об'єктів із фільтрацією, мульти-сортуванням та пагінацією (CQRS Read).",
 )
 async def list_targets(
-    use_case: Annotated[ListTargetsUseCase, Depends(get_list_targets_uc)],
+    pagination: Annotated[PaginationParams, Depends()],
+    sort: Annotated[
+        MultiSort[TargetSortField],
+        Depends(sort_dependency(TargetSortField, default=("-created_at",), max_fields=2)),
+    ],
+    query_service: Annotated[TargetQueryService, Depends(get_target_query_service)],
     category: Annotated[str | None, Query(description="Фільтр за категорією")] = None,
     search: Annotated[str | None, Query(description="Пошук за назвою або слагом")] = None,
-    page: Annotated[int, Query(ge=1, description="Номер сторінки")] = 1,
-    page_size: Annotated[int, Query(ge=1, le=100, description="Розмір сторінки")] = 20,
+    min_rating: Annotated[Decimal | None, Query(ge=0, le=5, description="Мінімальний середній бал")] = None,
 ) -> PaginatedResponse[TargetResponseDTO]:
-    pagination = PaginationParams(page=page, page_size=page_size)
-    items, total = await use_case.execute(
+    filters = TargetFilterDTO(
         category=category,
         search=search,
-        page=page,
-        page_size=page_size,
+        min_rating=min_rating,
+        include_inactive=False,
     )
-    dto_items = [_to_target_dto(target, rating) for target, rating in items]
-    return PaginatedResponse.create(items=dto_items, total=total, pagination=pagination)
+    return await query_service.get_all(pagination=pagination, sort=sort, filters=filters)
 
 
 @router.get(
@@ -108,13 +111,9 @@ async def list_targets(
 @cache(expire=3600, namespace=settings.cache.namespace.targets)
 async def get_target_details(
     id_or_slug: str,
-    use_case: Annotated[GetTargetDetailsUseCase, Depends(get_target_details_uc)],
+    query_service: Annotated[TargetQueryService, Depends(get_target_query_service)],
 ) -> TargetResponseDTO:
-    lookup_val: UUID | str
-    try:
-        lookup_val = UUID(id_or_slug)
-    except ValueError:
-        lookup_val = id_or_slug
-
-    target, rating = await use_case.execute(lookup_val)
-    return _to_target_dto(target, rating)
+    target = await query_service.get_by_id_or_slug(id_or_slug)
+    if target is None:
+        raise TargetNotFoundException(id_or_slug)
+    return target

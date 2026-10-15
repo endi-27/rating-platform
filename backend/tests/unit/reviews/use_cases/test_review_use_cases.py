@@ -6,7 +6,6 @@ from uuid6 import uuid7
 from src.modules.reviews.application.dto import CreateReviewDTO
 from src.modules.reviews.application.use_cases import (
     CreateReviewUseCase,
-    ListTargetReviewsUseCase,
     ModerateReviewUseCase,
     VoteReviewUseCase,
 )
@@ -172,44 +171,6 @@ async def test_create_review_duplicate_raises_exception(
             user_id=user_id,
             dto=dto,
         )
-
-
-async def test_list_target_reviews(
-    uow: FakeUnitOfWork,
-    target_repo: FakeTargetRepository,
-    review_repo: FakeReviewRepository,
-) -> None:
-    target = Target.create(slug="alien-1979", title="Alien", category="movie")
-    await target_repo.save(target)
-
-    r1 = Review.create(
-        target_id=target.id,
-        user_id=uuid7(),
-        score=5,
-        content="In space no one can hear you scream.",
-    )
-    r2 = Review.create(
-        target_id=target.id,
-        user_id=uuid7(),
-        score=4,
-        content="Superb horror atmosphere and pacing.",
-    )
-    await review_repo.save(r1)
-    await review_repo.save(r2)
-
-    use_case = ListTargetReviewsUseCase(
-        uow=uow,
-        target_repo=target_repo,
-        review_repo=review_repo,
-    )
-
-    reviews, total = await use_case.execute(target_id=target.id, page=1, page_size=10)
-    assert total == 2
-    assert len(reviews) == 2
-
-    # Target not found
-    with pytest.raises(TargetNotFoundException):
-        await use_case.execute(target_id=uuid7())
 
 
 async def test_vote_review_use_case(

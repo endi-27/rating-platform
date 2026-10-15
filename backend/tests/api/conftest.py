@@ -7,7 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from uuid6 import uuid7
 
-from src.api import get_uow
+from src.api import get_read_db_session, get_uow
 from src.core import (
     IUnitOfWork,
     SystemRole,
@@ -53,7 +53,7 @@ async def api_client(db_session: AsyncSession) -> AsyncGenerator[AsyncClient, No
     """
     HTTP клієнт для API/E2E тестів з автоматичним скиданням
     усіх dependency_overrides після завершення тесту.
-    Автоматично підміняє get_db_session на транзакційну сесію із savepoint,
+    Автоматично підміняє get_db_session та get_read_db_session на транзакційну сесію із savepoint,
     що гарантує повний відкат усіх створених даних після тесту.
     """
 
@@ -61,6 +61,7 @@ async def api_client(db_session: AsyncSession) -> AsyncGenerator[AsyncClient, No
         yield db_session
 
     app.dependency_overrides[get_db_session] = _override_get_db_session
+    app.dependency_overrides[get_read_db_session] = _override_get_db_session
     transport = ASGITransport(app=app)
     async with ApiTestClient(transport=transport, base_url="http://testserver") as client:
         yield client

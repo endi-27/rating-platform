@@ -143,3 +143,38 @@ async def test_get_target_details_by_id_and_slug(
     # Get non-existent
     resp_404 = await api_client.get(f"/api/v1/targets/{uuid7()}")
     assert resp_404.status_code == 404
+
+
+async def test_list_targets_sorting_and_filters(
+    api_client: AsyncClient,
+    superadmin_cookies: dict[str, str],
+) -> None:
+    # Створюємо кілька таргетів з різними назвами
+    for prefix in ["alpha", "beta", "gamma"]:
+        slug = f"{prefix}-{uuid7().hex[:8]}"
+        await api_client.post(
+            "/api/v1/targets",
+            json={"slug": slug, "title": f"Target {prefix.upper()}", "category": "books"},
+            cookies=superadmin_cookies,
+        )
+
+    # 1. Сортування за назвою (title asc)
+    resp_asc = await api_client.get("/api/v1/targets", params={"sort": "title", "category": "books"})
+    assert resp_asc.status_code == 200
+    titles_asc = [item["title"] for item in resp_asc.json()["items"]]
+    assert titles_asc == sorted(titles_asc)
+
+    # 2. Сортування за назвою (title desc)
+    resp_desc = await api_client.get("/api/v1/targets", params={"sort": "-title", "category": "books"})
+    assert resp_desc.status_code == 200
+    titles_desc = [item["title"] for item in resp_desc.json()["items"]]
+    assert titles_desc == sorted(titles_desc, reverse=True)
+
+    # 3. Пошук search за префіксом
+    resp_search = await api_client.get("/api/v1/targets", params={"search": "alpha"})
+    assert resp_search.status_code == 200
+    assert all("alpha" in item["slug"] or "alpha" in item["title"].lower() for item in resp_search.json()["items"])
+
+    # 4. Невалідне сортування -> 422 Unprocessable Entity
+    resp_inv = await api_client.get("/api/v1/targets", params={"sort": "unsupported_field"})
+    assert resp_inv.status_code == 422

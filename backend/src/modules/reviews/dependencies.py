@@ -5,15 +5,12 @@ from typing import Annotated
 from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.api import get_uow
+from src.api import get_read_db_session, get_uow
 from src.core import IEventBus, IUnitOfWork, get_db_session
 from src.core.events import get_event_bus
 from src.modules.reviews.application.use_cases import (
     CreateReviewUseCase,
     CreateTargetUseCase,
-    GetTargetDetailsUseCase,
-    ListTargetReviewsUseCase,
-    ListTargetsUseCase,
     ModerateReviewUseCase,
     VoteReviewUseCase,
 )
@@ -29,8 +26,12 @@ from src.modules.reviews.infrastructure.repositories import (
     SqlAlchemyTargetRatingRepository,
     SqlAlchemyTargetRepository,
 )
+from src.modules.reviews.queries import (
+    ReviewQueryService,
+    TargetQueryService,
+)
 
-# === 1. Репозиторії ===
+# === 1. Репозиторії (Write Path) ===
 
 
 def get_target_repo(
@@ -57,7 +58,22 @@ def get_review_vote_repo(
     return SqlAlchemyReviewVoteRepository(session=session)
 
 
-# === 2. Use Cases ===
+# === 2. Query Services (Read-Side CQRS / Read Replica Session) ===
+
+
+def get_target_query_service(
+    session: Annotated[AsyncSession, Depends(get_read_db_session)],
+) -> TargetQueryService:
+    return TargetQueryService(session=session)
+
+
+def get_review_query_service(
+    session: Annotated[AsyncSession, Depends(get_read_db_session)],
+) -> ReviewQueryService:
+    return ReviewQueryService(session=session)
+
+
+# === 3. Use Cases (Write Path / Primary Session) ===
 
 
 def get_create_target_uc(
@@ -74,30 +90,6 @@ def get_create_target_uc(
     )
 
 
-def get_target_details_uc(
-    uow: Annotated[IUnitOfWork, Depends(get_uow)],
-    target_repo: Annotated[ITargetRepository, Depends(get_target_repo)],
-    rating_repo: Annotated[ITargetRatingRepository, Depends(get_target_rating_repo)],
-) -> GetTargetDetailsUseCase:
-    return GetTargetDetailsUseCase(
-        uow=uow,
-        target_repo=target_repo,
-        rating_repo=rating_repo,
-    )
-
-
-def get_list_targets_uc(
-    uow: Annotated[IUnitOfWork, Depends(get_uow)],
-    target_repo: Annotated[ITargetRepository, Depends(get_target_repo)],
-    rating_repo: Annotated[ITargetRatingRepository, Depends(get_target_rating_repo)],
-) -> ListTargetsUseCase:
-    return ListTargetsUseCase(
-        uow=uow,
-        target_repo=target_repo,
-        rating_repo=rating_repo,
-    )
-
-
 def get_create_review_uc(
     uow: Annotated[IUnitOfWork, Depends(get_uow)],
     target_repo: Annotated[ITargetRepository, Depends(get_target_repo)],
@@ -111,18 +103,6 @@ def get_create_review_uc(
         rating_repo=rating_repo,
         review_repo=review_repo,
         event_bus=event_bus,
-    )
-
-
-def get_list_target_reviews_uc(
-    uow: Annotated[IUnitOfWork, Depends(get_uow)],
-    target_repo: Annotated[ITargetRepository, Depends(get_target_repo)],
-    review_repo: Annotated[IReviewRepository, Depends(get_review_repo)],
-) -> ListTargetReviewsUseCase:
-    return ListTargetReviewsUseCase(
-        uow=uow,
-        target_repo=target_repo,
-        review_repo=review_repo,
     )
 
 
