@@ -316,3 +316,45 @@ async def test_refresh_token_deactivated_user() -> None:
     assert len(failed_events) == 1
     assert failed_events[0].entity_id == user.id
     assert failed_events[0].reason == TokenRefreshFailureReason.ACCOUNT_DEACTIVATED
+
+
+async def test_refresh_token_user_not_found_in_gateway() -> None:
+    uow = FakeUnitOfWork()
+    user_repo = FakeUserRepository()
+    user_gateway = FakeUserAuthGateway(user_repo)
+    refresh_repo = FakeRefreshTokenRepository()
+    event_bus = FakeEventBus()
+
+    non_existent_user_id = uuid7()
+    now = datetime.now(UTC)
+    raw_token = "valid_token_missing_user_with_32_chars"
+    raw_hash = hashlib.sha256(raw_token.encode("utf-8")).hexdigest()
+
+    token = RefreshToken.create(
+        user_id=non_existent_user_id,
+        token_hash=raw_hash,
+        expires_at=now + timedelta(days=7),
+        max_session_expiration=now + timedelta(days=30),
+        issued_at=now,
+    )
+    await refresh_repo.create(token)
+
+    use_case = RefreshTokenUseCase(
+        uow=uow,
+        users_gateway=user_gateway,
+        refresh_repo=refresh_repo,
+        event_bus=event_bus,
+    )
+
+    dto = RefreshTokenDTO(refresh_token=raw_token)
+
+    with pytest.raises(AccountDeactivatedException, match="Обліковий запис користувача деактивовано"):
+        await use_case.execute(dto, ip_address="127.0.0.1")
+
+    assert uow.committed is False
+    assert uow.rolled_back is True
+
+    failed_events = event_bus.get_events_of_type(TokenRefreshFailedEvent)
+    assert len(failed_events) == 1
+    assert failed_events[0].entity_id == non_existent_user_id
+    assert failed_events[0].reason == TokenRefreshFailureReason.ACCOUNT_DEACTIVATED

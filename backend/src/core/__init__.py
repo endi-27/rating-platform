@@ -18,7 +18,7 @@ from src.core.database import (
     get_db_session,
 )
 from src.core.domain import AggregateRoot, BaseEntity
-from src.core.enums import PermissionCode, SystemRole
+from src.core.enums import PermissionCode, RoleCode, SystemRole
 from src.core.exceptions import (
     AccountDeactivatedException,
     AppException,
@@ -36,6 +36,7 @@ from src.core.exceptions import (
     ResourceAlreadyInactiveException,
     ResourceLockedException,
     UnauthorizedException,
+    UserAlreadyExistsException,
 )
 from src.core.limiter import limiter
 from src.core.logger import logger, setup_logging, setup_worker_logging
@@ -83,9 +84,11 @@ __all__ = [
     "ResourceAlreadyActiveException",
     "ResourceAlreadyInactiveException",
     "ResourceLockedException",
+    "RoleCode",
     "Settings",
     "SystemRole",
     "UnauthorizedException",
+    "UserAlreadyExistsException",
     "async_session_factory",
     "close_db",
     "close_redis",

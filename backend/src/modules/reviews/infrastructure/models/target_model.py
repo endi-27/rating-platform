@@ -41,9 +41,11 @@ class TargetModel(Base, UUIDPrimaryKeyMixin, VersionedMixin, TimestampMixin, Sof
         back_populates="target",
         uselist=False,
         cascade="all, delete-orphan",
+        lazy="raise",
     )
     reviews: Mapped[list["ReviewModel"]] = relationship(
         "ReviewModel",
         back_populates="target",
         cascade="all, delete-orphan",
+        lazy="raise",
     )

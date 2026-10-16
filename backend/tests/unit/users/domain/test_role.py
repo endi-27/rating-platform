@@ -6,6 +6,7 @@ from uuid6 import uuid7
 from src.core import (
     InactiveEntityError,
     PermissionCode,
+    ResourceAlreadyActiveException,
     ResourceAlreadyInactiveException,
     SystemRole,
 )
@@ -227,3 +228,31 @@ def test_role_soft_delete_already_inactive_raises() -> None:
 
     with pytest.raises(ResourceAlreadyInactiveException):
         role.soft_delete()
+
+
+def test_role_restore_success() -> None:
+    role = Role.create(code="temporary", name="Тимчасова роль")
+    role.soft_delete()
+    assert role.is_active is False
+
+    role.restore()
+    assert role.is_active is True
+    assert role.deleted_at is None
+
+
+def test_role_restore_already_active_raises() -> None:
+    role = Role.create(code="temporary", name="Тимчасова роль")
+    with pytest.raises(ResourceAlreadyActiveException):
+        role.restore()
+
+
+def test_role_permissions_list_converted_to_set() -> None:
+    p = _make_permission(PermissionCode.USERS_READ)
+    role = Role(
+        id=uuid7(),
+        code="test_role",
+        name="Test Role",
+        permissions=[p],  # type: ignore[arg-type]
+    )
+    assert isinstance(role.permissions, set)
+    assert role.permissions == {p}

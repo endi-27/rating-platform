@@ -24,6 +24,7 @@ class SqlAlchemyTargetRatingRepository(ITargetRatingRepository):
         else:
             TargetRatingMapper.update_to_orm(orm, rating)
         await self._session.flush()
+        rating.version = orm.version
 
     async def get_by_target_id(self, target_id: UUID, /) -> TargetRating | None:
         orm = await self._session.get(TargetRatingModel, target_id)

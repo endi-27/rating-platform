@@ -4,6 +4,7 @@ from src.core import IEventBus, IUnitOfWork, logger
 from src.modules.reviews.domain.events import ReviewUpdatedEvent
 from src.modules.reviews.domain.exceptions import ReviewNotFoundException
 from src.modules.reviews.domain.interfaces import IReviewRepository, ITargetRatingRepository
+from src.utils import check_optimistic_lock
 
 
 class ModerateReviewUseCase:
@@ -21,29 +22,33 @@ class ModerateReviewUseCase:
         self._rating_repo = rating_repo
         self._event_bus = event_bus
 
-    async def execute(self, *, review_id: UUID, action: str) -> UUID:
+    async def execute(self, *, review_id: UUID, action: str, version: int | None = None) -> UUID:
         async with self._uow:
             review = await self._review_repo.get_by_id(review_id)
             if review is None or not review.is_active:
                 raise ReviewNotFoundException(review_id)
 
-            old_status = review.status
-            rating = await self._rating_repo.get_by_target_id(review.target_id)
+            if version is not None:
+                check_optimistic_lock(review.version, version, "відгуку")
 
-            if action == "hide" and old_status != "hidden":
+            was_counted = review.is_counted_in_rating
+
+            if action == "hide":
                 review.hide()
-                if old_status == "published" and rating is not None:
-                    rating.apply_deleted_review(review.score)
-                    await self._rating_repo.save(rating)
-
-            elif action == "publish" and old_status != "published":
+            elif action == "publish":
                 review.publish()
-                if old_status == "hidden" and rating is not None:
-                    rating.apply_new_review(review.score)
-                    await self._rating_repo.save(rating)
-
             elif action == "flag":
                 review.flag()
+
+            is_now_counted = review.is_counted_in_rating
+            if was_counted != is_now_counted:
+                rating = await self._rating_repo.get_by_target_id(review.target_id)
+                if rating is not None:
+                    if was_counted and not is_now_counted:
+                        rating.apply_deleted_review(review.score)
+                    elif not was_counted and is_now_counted:
+                        rating.apply_new_review(review.score)
+                    await self._rating_repo.save(rating)
 
             await self._review_repo.save(review)
             await self._uow.commit()

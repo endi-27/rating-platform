@@ -22,6 +22,7 @@ from src.modules.users.domain.exceptions import (
     SelfActionForbiddenError,
     SuperAdminProtectionError,
     UserAlreadyExistsError,
+    UserAlreadyExistsException,
     UserNotFoundError,
 )
 from src.modules.users.domain.interfaces import (
@@ -61,6 +62,7 @@ __all__ = [
     "SuperAdminProtectionError",
     "User",
     "UserAlreadyExistsError",
+    "UserAlreadyExistsException",
     "UserCreatedEvent",
     "UserCredentialsChangedEvent",
     "UserDeactivatedEvent",

@@ -164,7 +164,7 @@ async def no_permissions_user(db_session: AsyncSession) -> UserModel:
         role_id=role.id,
     )
     db_session.add(user)
-    await db_session.flush()
+    await db_session.commit()
     db_session.expunge(user)
     db_session.expunge(role)
     return user
@@ -202,7 +202,7 @@ async def admin_user_with_permissions(
 
     for p in all_perms:
         db_session.add(UserPermissionModel(user_id=user.id, permission_id=p.id))
-    await db_session.flush()
+    await db_session.commit()
     db_session.expunge(user)
     return user
 

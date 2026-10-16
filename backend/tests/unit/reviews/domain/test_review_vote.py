@@ -32,3 +32,20 @@ def test_review_vote_change_vote() -> None:
     assert vote.is_helpful is False
     vote.change_vote(True)
     assert vote.is_helpful is True
+
+
+def test_review_vote_creation_unhelpful() -> None:
+    review_id = uuid7()
+    user_id = uuid7()
+
+    vote = ReviewVote.create(
+        review_id=review_id,
+        user_id=user_id,
+        is_helpful=False,
+    )
+
+    assert vote.id is not None
+    assert vote.review_id == review_id
+    assert vote.user_id == user_id
+    assert vote.is_helpful is False
+    assert vote.created_at is not None

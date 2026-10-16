@@ -2,18 +2,28 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
+from datetime import datetime
 from decimal import Decimal
 from typing import Protocol
 from uuid import UUID
 
 from src.modules.reviews.domain.models import Review, ReviewVote, Target, TargetRating
-from src.modules.users import UserResponseDTO
+
+
+class IUserRecord(Protocol):
+    """Мінімальний протокол сутності користувача, необхідний модулю Reviews."""
+
+    @property
+    def id(self) -> UUID: ...
+
+    @property
+    def deleted_at(self) -> datetime | None: ...
 
 
 class IUserGateway(Protocol):
     """Шлюз до модуля Users для перевірки існування та активності користувачів."""
 
-    async def get_user_by_id(self, user_id: UUID, /) -> UserResponseDTO | None:
+    async def get_user_by_id(self, user_id: UUID, /) -> IUserRecord | None:
         """Отримання даних користувача за ID."""
         ...
 
@@ -61,6 +71,11 @@ class ITargetRepository(ABC):
         search: str | None = None,
     ) -> int:
         """Загальна кількість об'єктів за фільтрами."""
+        ...
+
+    @abstractmethod
+    async def delete_by_id(self, target_id: UUID, /) -> bool:
+        """Фізичне видалення об'єкта оцінювання."""
         ...
 
 

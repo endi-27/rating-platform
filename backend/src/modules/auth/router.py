@@ -7,12 +7,14 @@ from src.modules.auth.application.dto import (
     LoginDTO,
     LogoutDTO,
     RefreshTokenDTO,
+    RegisterDTO,
     StatusResponseDTO,
 )
 from src.modules.auth.application.use_cases import (
     AuthenticateUserUseCase,
     LogoutUseCase,
     RefreshTokenUseCase,
+    RegisterPublicUserUseCase,
 )
 from src.modules.auth.cookies import (
     clear_auth_cookies,
@@ -26,11 +28,37 @@ from src.modules.auth.dependencies import (
     get_current_user_optional,
     get_logout_uc,
     get_refresh_token_uc,
+    get_register_public_user_uc,
     get_users_gateway,
 )
 from src.modules.auth.domain import AuthOperationStatus, IUserAuthGateway
 
 auth_router = APIRouter(prefix="/auth", tags=["Auth"])
+
+
+@auth_router.post("/register", status_code=status.HTTP_201_CREATED)
+async def register(
+    dto: RegisterDTO,
+    request: Request,
+    response: Response,
+    register_uc: Annotated[RegisterPublicUserUseCase, Depends(get_register_public_user_uc)],
+    users_gateway: Annotated[IUserAuthGateway, Depends(get_users_gateway)],
+) -> CurrentUser:
+    """
+    Публічна реєстрація нового користувача (Cookie-only).
+    Створює обліковий запис із роллю 'user', генерує сесію та встановлює HttpOnly cookies.
+    """
+    ip_address = request.client.host if request.client else None
+    result = await register_uc.execute(dto, ip_address=ip_address)
+
+    secure = is_secure_request(request)
+    set_access_cookie(response, result.access_token, is_remember_me=result.is_remember_me, secure=secure)
+    set_refresh_cookie(response, result.refresh_token, is_remember_me=result.is_remember_me, secure=secure)
+
+    user = await users_gateway.get_cached_current_user(result.user_id)
+    if not user:
+        raise UnauthorizedException("Користувача не знайдено.")
+    return user
 
 
 @auth_router.post("/login")

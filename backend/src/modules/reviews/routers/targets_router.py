@@ -1,5 +1,6 @@
 from decimal import Decimal
 from typing import Annotated
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query, status
 from fastapi_cache.decorator import cache
@@ -7,15 +8,22 @@ from fastapi_cache.decorator import cache
 from src.api.schemas.pagination import PaginatedResponse, PaginationParams
 from src.api.schemas.sorting import MultiSort, sort_dependency
 from src.core import CurrentUser, PermissionCode, settings
-from src.modules.auth.dependencies import require_permission
+from src.modules.auth import require_permission
 from src.modules.reviews.application.dto import (
     CreateTargetDTO,
     TargetResponseDTO,
+    UpdateTargetDTO,
 )
-from src.modules.reviews.application.use_cases import CreateTargetUseCase
+from src.modules.reviews.application.use_cases import (
+    CreateTargetUseCase,
+    DeleteTargetUseCase,
+    UpdateTargetUseCase,
+)
 from src.modules.reviews.dependencies import (
     get_create_target_uc,
+    get_delete_target_uc,
     get_target_query_service,
+    get_update_target_uc,
 )
 from src.modules.reviews.domain.exceptions import TargetNotFoundException
 from src.modules.reviews.queries import (
@@ -88,3 +96,38 @@ async def get_target_details(
     if target is None:
         raise TargetNotFoundException(id_or_slug)
     return target
+
+
+@router.put(
+    "/{target_id}",
+    response_model=TargetResponseDTO,
+    status_code=status.HTTP_200_OK,
+    summary="Оновлення об'єкта оцінювання",
+    description="Повне оновлення об'єкта оцінювання з перевіркою версії (OCC). Вимагає дозволу TARGETS_UPDATE.",
+)
+async def update_target(
+    target_id: UUID,
+    payload: UpdateTargetDTO,
+    use_case: Annotated[UpdateTargetUseCase, Depends(get_update_target_uc)],
+    query_service: Annotated[TargetQueryService, Depends(get_target_query_service)],
+    current_user: Annotated[CurrentUser, Depends(require_permission(PermissionCode.TARGETS_UPDATE))],
+) -> TargetResponseDTO:
+    await use_case.execute(target_id=target_id, dto=payload)
+    target = await query_service.get_by_id(target_id)
+    if target is None:
+        raise TargetNotFoundException(target_id)
+    return target
+
+
+@router.delete(
+    "/{target_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Видалення об'єкта оцінювання",
+    description="Видаляє об'єкт оцінювання. Вимагає дозволу TARGETS_DELETE.",
+)
+async def delete_target(
+    target_id: UUID,
+    use_case: Annotated[DeleteTargetUseCase, Depends(get_delete_target_uc)],
+    current_user: Annotated[CurrentUser, Depends(require_permission(PermissionCode.TARGETS_DELETE))],
+) -> None:
+    await use_case.execute(target_id=target_id)

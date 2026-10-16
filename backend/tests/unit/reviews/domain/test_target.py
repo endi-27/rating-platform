@@ -151,3 +151,13 @@ def test_target_soft_delete_and_restore() -> None:
     # Cannot restore already active
     with pytest.raises(ResourceAlreadyActiveException):
         target.restore()
+
+
+def test_target_update_details_title_max_length_and_whitespace_description() -> None:
+    target = Target.create(slug="dune-2021", title="Dune", category="movie", description="Original desc")
+
+    with pytest.raises(DomainException, match="Назва об'єкта"):
+        target.update_details(title="A" * 256)
+
+    target.update_details(description="   ")
+    assert target.description is None

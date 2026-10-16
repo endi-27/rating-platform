@@ -45,7 +45,7 @@ class TargetRatingModel(Base, VersionedMixin):
     )
 
     # Зв'язок
-    target: Mapped["TargetModel"] = relationship("TargetModel", back_populates="rating")
+    target: Mapped["TargetModel"] = relationship("TargetModel", back_populates="rating", lazy="raise")
 
     __table_args__ = (
         CheckConstraint("total_reviews >= 0", name="ck_target_ratings_total_reviews_positive"),

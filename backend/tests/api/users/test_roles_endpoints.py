@@ -381,3 +381,47 @@ async def test_delete_role_and_preview_endpoints(
     assigned_del = await api_client.delete(f"/api/v1/roles/{assigned_role.id}", cookies=superadmin_cookies)
     assert assigned_del.status_code == 409
     assert assigned_del.json()["error_code"] in ("ROLE_ASSIGNED_TO_USERS", "RESOURCE_LOCKED", "CONFLICT")
+
+
+@pytest.mark.asyncio
+async def test_roles_unhappy_paths_401_and_404(
+    api_client: AsyncClient,
+    superadmin_cookies: dict[str, str],
+) -> None:
+    non_existent_id = uuid7()
+    update_payload = {"name": "New Role Name", "permission_ids": [], "version": 1}
+
+    # PUT /roles/{id}
+    assert (await api_client.put(f"/api/v1/roles/{non_existent_id}", json=update_payload)).status_code == 401
+    assert (
+        await api_client.put(f"/api/v1/roles/{non_existent_id}", json=update_payload, cookies=superadmin_cookies)
+    ).status_code == 404
+
+    # DELETE /roles/{id}
+    assert (await api_client.delete(f"/api/v1/roles/{non_existent_id}")).status_code == 401
+    assert (await api_client.delete(f"/api/v1/roles/{non_existent_id}", cookies=superadmin_cookies)).status_code == 404
+
+    # PATCH /roles/{id}/deactivate
+    assert (
+        await api_client.patch(f"/api/v1/roles/{non_existent_id}/deactivate", json={"version": 1})
+    ).status_code == 401
+    assert (
+        await api_client.patch(
+            f"/api/v1/roles/{non_existent_id}/deactivate", json={"version": 1}, cookies=superadmin_cookies
+        )
+    ).status_code == 404
+
+    # PATCH /roles/{id}/restore
+    assert (await api_client.patch(f"/api/v1/roles/{non_existent_id}/restore", json={"version": 1})).status_code == 401
+    assert (
+        await api_client.patch(
+            f"/api/v1/roles/{non_existent_id}/restore", json={"version": 1}, cookies=superadmin_cookies
+        )
+    ).status_code == 404
+
+    # GET /roles/{id}/delete-preview
+    assert (await api_client.get(f"/api/v1/roles/{non_existent_id}/delete-preview")).status_code == 401
+    res_prev = await api_client.get(f"/api/v1/roles/{non_existent_id}/delete-preview", cookies=superadmin_cookies)
+    assert res_prev.status_code == 200
+    assert res_prev.json()["action"] == "blocked"
+    assert res_prev.json()["restriction"]["code"] == "not_found"

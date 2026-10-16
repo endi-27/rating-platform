@@ -25,6 +25,11 @@ class Review(AggregateRoot):
     helpful_count: int = 0
     unhelpful_count: int = 0
 
+    @property
+    def is_counted_in_rating(self) -> bool:
+        """Чи враховується цей відгук у розрахунку агрегованого рейтингу цілі."""
+        return self.is_active and self.status != "hidden"
+
     def __post_init__(self) -> None:
         self._validate_score(self.score)
         self._validate_content(self.content)

@@ -27,6 +27,7 @@ from src.modules.auth.application.use_cases import (
     AuthenticateUserUseCase,
     LogoutUseCase,
     RefreshTokenUseCase,
+    RegisterPublicUserUseCase,
 )
 from src.modules.auth.domain import (
     IRefreshTokenRepository,
@@ -51,6 +52,20 @@ def get_refresh_token_repo(
 
 
 # --- DI Use Cases ---
+
+
+def get_register_public_user_uc(
+    uow: Annotated[IUnitOfWork, Depends(get_uow)],
+    users_gateway: Annotated[IUserAuthGateway, Depends(get_users_gateway)],
+    refresh_repo: Annotated[IRefreshTokenRepository, Depends(get_refresh_token_repo)],
+    event_bus: Annotated[IEventBus, Depends(get_event_bus)],
+) -> RegisterPublicUserUseCase:
+    return RegisterPublicUserUseCase(
+        uow=uow,
+        users_gateway=users_gateway,
+        refresh_repo=refresh_repo,
+        event_bus=event_bus,
+    )
 
 
 def get_authenticate_user_uc(

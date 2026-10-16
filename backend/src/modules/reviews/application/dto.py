@@ -43,15 +43,27 @@ class CreateTargetDTO(BaseModel):
 
 
 class UpdateTargetDTO(BaseModel):
-    """Схема оновлення інформації про об'єкт."""
+    """Схема повного оновлення інформації про об'єкт (Full PUT)."""
 
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
-    title: Annotated[str | None, Field(default=None, min_length=1, max_length=255)] = None
-    category: Annotated[str | None, Field(default=None, min_length=1, max_length=100)] = None
-    description: Annotated[str | None, Field(default=None, max_length=2000)] = None
-    metadata: Annotated[dict[str, Any] | None, Field(default=None)] = None
-    version: Annotated[int, Field(ge=1, description="OCC версія")]
+    title: Annotated[
+        str,
+        Field(min_length=1, max_length=255, description="Назва об'єкта", examples=["Інтерстеллар"]),
+    ]
+    category: Annotated[
+        str,
+        Field(min_length=1, max_length=100, description="Категорія об'єкта", examples=["movie"]),
+    ]
+    description: Annotated[
+        str | None,
+        Field(default=None, max_length=2000, description="Детальний опис"),
+    ] = None
+    metadata: Annotated[
+        dict[str, Any],
+        Field(default_factory=dict, description="Специфічні властивості об'єкта (JSONB)"),
+    ] = Field(default_factory=dict)
+    version: Annotated[int, Field(ge=1, description="OCC версія для оптимістичного блокування")]
 
 
 class CreateReviewDTO(BaseModel):
@@ -73,6 +85,28 @@ class CreateReviewDTO(BaseModel):
             examples=["Неймовірний фільм, візуальний ряд та музика на найвищому рівні!"],
         ),
     ]
+
+
+class UpdateReviewDTO(BaseModel):
+    """Схема оновлення змісту та оцінки власного відгуку (Full PUT)."""
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    score: Annotated[int, Field(ge=1, le=5, description="Оцінка від 1 до 5 зірок", examples=[5])]
+    title: Annotated[
+        str | None,
+        Field(default=None, max_length=150, description="Короткий заголовок враження"),
+    ] = None
+    content: Annotated[
+        str,
+        Field(
+            min_length=10,
+            max_length=5000,
+            description="Текст відгуку (від 10 до 5000 символів)",
+            examples=["Оновлений текст відгуку: фільм залишається шедевром кінематографу."],
+        ),
+    ]
+    version: Annotated[int, Field(ge=1, description="OCC версія для оптимістичного блокування")]
 
 
 class VoteReviewDTO(BaseModel):
@@ -98,6 +132,10 @@ class ModerateReviewDTO(BaseModel):
             description="Дія модерації: hide (приховати), publish (опублікувати), flag (позначити)",
         ),
     ]
+    version: Annotated[
+        int | None,
+        Field(default=None, ge=1, description="OCC версія для запобігання втраченим оновленням"),
+    ] = None
 
 
 __all__ = [
@@ -107,6 +145,7 @@ __all__ = [
     "ReviewResponseDTO",
     "TargetRatingResponseDTO",
     "TargetResponseDTO",
+    "UpdateReviewDTO",
     "UpdateTargetDTO",
     "VoteReviewDTO",
 ]

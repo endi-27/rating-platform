@@ -28,6 +28,6 @@ class ReviewVoteModel(Base, UUIDPrimaryKeyMixin, CreatedAtMixin):
     is_helpful: Mapped[bool] = mapped_column(Boolean, nullable=False)
 
     # Зв'язок
-    review: Mapped["ReviewModel"] = relationship("ReviewModel", back_populates="votes")
+    review: Mapped["ReviewModel"] = relationship("ReviewModel", back_populates="votes", lazy="raise")
 
     __table_args__ = (UniqueConstraint("review_id", "user_id", name="uq_review_votes_review_user"),)

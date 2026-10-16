@@ -65,6 +65,12 @@ class FakeTargetRepository(ITargetRepository):
             items = [t for t in items if s in t.title.lower() or s in t.slug.lower()]
         return len(items)
 
+    async def delete_by_id(self, target_id: UUID, /) -> bool:
+        if target_id in self.targets:
+            del self.targets[target_id]
+            return True
+        return False
+
 
 class FakeTargetRatingRepository(ITargetRatingRepository):
     """Швидкий тестовий дублер сховища TargetRating."""

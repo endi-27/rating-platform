@@ -205,3 +205,50 @@ def test_review_soft_delete_and_restore() -> None:
 
     with pytest.raises(ResourceAlreadyActiveException):
         review.restore()
+
+
+def test_review_update_content_title_too_long() -> None:
+    review = Review.create(
+        target_id=uuid7(),
+        user_id=uuid7(),
+        score=5,
+        content="Valid content string for testing.",
+    )
+    with pytest.raises(DomainException, match="Заголовок відгуку не може"):
+        review.update_content(title="A" * 151)
+
+
+def test_review_is_counted_in_rating_property() -> None:
+    review = Review.create(
+        target_id=uuid7(),
+        user_id=uuid7(),
+        score=5,
+        content="Valid content string for testing.",
+    )
+    # Published & active
+    assert review.status == "published"
+    assert review.is_counted_in_rating is True
+
+    # Flagged & active
+    review.flag()
+    assert review.status == "flagged"
+    assert review.is_counted_in_rating is True
+
+    # Hidden & active
+    review.hide()
+    assert review.status == "hidden"
+    assert review.is_counted_in_rating is False
+
+    # Published back
+    review.publish()
+    assert review.is_counted_in_rating is True
+
+    # Soft deleted
+    review.soft_delete()
+    assert review.is_active is False
+    assert review.is_counted_in_rating is False
+
+    # Restored
+    review.restore()
+    assert review.is_active is True
+    assert review.is_counted_in_rating is True

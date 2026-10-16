@@ -9,7 +9,7 @@ from sqlalchemy import (
     SmallInteger,
     String,
     Text,
-    UniqueConstraint,
+    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -49,15 +49,22 @@ class ReviewModel(Base, UUIDPrimaryKeyMixin, VersionedMixin, TimestampMixin, Sof
     unhelpful_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
 
     # Зв'язки
-    target: Mapped["TargetModel"] = relationship("TargetModel", back_populates="reviews")
+    target: Mapped["TargetModel"] = relationship("TargetModel", back_populates="reviews", lazy="raise")
     votes: Mapped[list["ReviewVoteModel"]] = relationship(
         "ReviewVoteModel",
         back_populates="review",
         cascade="all, delete-orphan",
+        lazy="raise",
     )
 
     __table_args__ = (
-        UniqueConstraint("target_id", "user_id", name="uq_reviews_target_user"),
+        Index(
+            "uq_reviews_target_user_active",
+            "target_id",
+            "user_id",
+            unique=True,
+            postgresql_where=text("deleted_at IS NULL"),
+        ),
         CheckConstraint("score >= 1 AND score <= 5", name="ck_reviews_score_range"),
         Index("ix_reviews_target_status_created", "target_id", "status", "created_at"),
     )

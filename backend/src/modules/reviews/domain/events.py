@@ -11,6 +11,19 @@ class TargetCreatedEvent(BaseEvent):
     category: str
 
 
+class TargetUpdatedEvent(BaseEvent):
+    """Подія оновлення об'єкта оцінювання."""
+
+    target_id: UUID
+    version: int
+
+
+class TargetDeletedEvent(BaseEvent):
+    """Подія видалення об'єкта оцінювання."""
+
+    target_id: UUID
+
+
 class ReviewCreatedEvent(BaseEvent):
     """Подія створення нового відгуку (інвалідація кешу + фоновий перерахунок)."""
 

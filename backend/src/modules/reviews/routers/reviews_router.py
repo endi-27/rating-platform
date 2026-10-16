@@ -7,24 +7,29 @@ from fastapi_cache.decorator import cache
 from src.api.schemas.pagination import PaginatedResponse, PaginationParams
 from src.api.schemas.sorting import MultiSort, sort_dependency
 from src.core import CurrentUser, PermissionCode, settings
-from src.modules.auth.dependencies import require_permission
+from src.modules.auth import require_permission
 from src.modules.reviews.application.dto import (
     CreateReviewDTO,
     ModerateReviewDTO,
     ReviewResponseDTO,
     TargetRatingResponseDTO,
+    UpdateReviewDTO,
     VoteReviewDTO,
 )
 from src.modules.reviews.application.use_cases import (
     CreateReviewUseCase,
+    DeleteReviewUseCase,
     ModerateReviewUseCase,
+    UpdateReviewUseCase,
     VoteReviewUseCase,
 )
 from src.modules.reviews.dependencies import (
     get_create_review_uc,
+    get_delete_review_uc,
     get_moderate_review_uc,
     get_review_query_service,
     get_target_query_service,
+    get_update_review_uc,
     get_vote_review_uc,
 )
 from src.modules.reviews.domain.exceptions import (
@@ -146,6 +151,54 @@ async def vote_review(
     }
 
 
+@router.put(
+    "/targets/{target_id}/reviews/{review_id}",
+    response_model=ReviewResponseDTO,
+    status_code=status.HTTP_200_OK,
+    summary="Оновлення власного відгуку",
+    description="Повне оновлення оцінки та змісту відгуку з перевіркою версії (OCC). Вимагає дозволу REVIEWS_UPDATE.",
+)
+async def update_review(
+    target_id: UUID,
+    review_id: UUID,
+    payload: UpdateReviewDTO,
+    use_case: Annotated[UpdateReviewUseCase, Depends(get_update_review_uc)],
+    review_queries: Annotated[ReviewQueryService, Depends(get_review_query_service)],
+    current_user: Annotated[CurrentUser, Depends(require_permission(PermissionCode.REVIEWS_UPDATE))],
+) -> ReviewResponseDTO:
+    await use_case.execute(
+        target_id=target_id,
+        review_id=review_id,
+        user_id=current_user.id,
+        dto=payload,
+    )
+    review = await review_queries.get_by_id(review_id)
+    if review is None:
+        raise ReviewNotFoundException(review_id)
+    return review
+
+
+@router.delete(
+    "/targets/{target_id}/reviews/{review_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Видалення відгуку",
+    description="Видаляє (деактивує) відгук. Доступно автору або модератору. Вимагає дозволу REVIEWS_DELETE.",
+)
+async def delete_review(
+    target_id: UUID,
+    review_id: UUID,
+    use_case: Annotated[DeleteReviewUseCase, Depends(get_delete_review_uc)],
+    current_user: Annotated[CurrentUser, Depends(require_permission(PermissionCode.REVIEWS_DELETE))],
+) -> None:
+    has_moderate_permission = PermissionCode.REVIEWS_MODERATE.value in current_user.effective_permissions
+    await use_case.execute(
+        target_id=target_id,
+        review_id=review_id,
+        user_id=current_user.id,
+        has_moderate_permission=has_moderate_permission,
+    )
+
+
 @router.patch(
     "/reviews/{review_id}/moderate",
     response_model=ReviewResponseDTO,
@@ -162,6 +215,7 @@ async def moderate_review(
     await use_case.execute(
         review_id=review_id,
         action=payload.action,
+        version=payload.version,
     )
     review = await review_queries.get_by_id(review_id)
     if review is None:

@@ -11,7 +11,11 @@ from src.core.events import get_event_bus
 from src.modules.reviews.application.use_cases import (
     CreateReviewUseCase,
     CreateTargetUseCase,
+    DeleteReviewUseCase,
+    DeleteTargetUseCase,
     ModerateReviewUseCase,
+    UpdateReviewUseCase,
+    UpdateTargetUseCase,
     VoteReviewUseCase,
 )
 from src.modules.reviews.domain.interfaces import (
@@ -100,6 +104,30 @@ def get_create_target_uc(
     )
 
 
+def get_update_target_uc(
+    uow: Annotated[IUnitOfWork, Depends(get_uow)],
+    target_repo: Annotated[ITargetRepository, Depends(get_target_repo)],
+    event_bus: Annotated[IEventBus, Depends(get_event_bus)],
+) -> UpdateTargetUseCase:
+    return UpdateTargetUseCase(
+        uow=uow,
+        target_repo=target_repo,
+        event_bus=event_bus,
+    )
+
+
+def get_delete_target_uc(
+    uow: Annotated[IUnitOfWork, Depends(get_uow)],
+    target_repo: Annotated[ITargetRepository, Depends(get_target_repo)],
+    event_bus: Annotated[IEventBus, Depends(get_event_bus)],
+) -> DeleteTargetUseCase:
+    return DeleteTargetUseCase(
+        uow=uow,
+        target_repo=target_repo,
+        event_bus=event_bus,
+    )
+
+
 def get_create_review_uc(
     uow: Annotated[IUnitOfWork, Depends(get_uow)],
     target_repo: Annotated[ITargetRepository, Depends(get_target_repo)],
@@ -115,6 +143,34 @@ def get_create_review_uc(
         review_repo=review_repo,
         event_bus=event_bus,
         user_gateway=user_gateway,
+    )
+
+
+def get_update_review_uc(
+    uow: Annotated[IUnitOfWork, Depends(get_uow)],
+    review_repo: Annotated[IReviewRepository, Depends(get_review_repo)],
+    rating_repo: Annotated[ITargetRatingRepository, Depends(get_target_rating_repo)],
+    event_bus: Annotated[IEventBus, Depends(get_event_bus)],
+) -> UpdateReviewUseCase:
+    return UpdateReviewUseCase(
+        uow=uow,
+        review_repo=review_repo,
+        rating_repo=rating_repo,
+        event_bus=event_bus,
+    )
+
+
+def get_delete_review_uc(
+    uow: Annotated[IUnitOfWork, Depends(get_uow)],
+    review_repo: Annotated[IReviewRepository, Depends(get_review_repo)],
+    rating_repo: Annotated[ITargetRatingRepository, Depends(get_target_rating_repo)],
+    event_bus: Annotated[IEventBus, Depends(get_event_bus)],
+) -> DeleteReviewUseCase:
+    return DeleteReviewUseCase(
+        uow=uow,
+        review_repo=review_repo,
+        rating_repo=rating_repo,
+        event_bus=event_bus,
     )
 
 

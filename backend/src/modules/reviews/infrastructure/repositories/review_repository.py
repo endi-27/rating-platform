@@ -24,6 +24,7 @@ class SqlAlchemyReviewRepository(SqlAlchemyBaseCrudRepository[Review, ReviewMode
         else:
             ReviewMapper.update_to_orm(orm, review)
         await self._session.flush()
+        review.version = orm.version
 
     async def get_by_target_and_user(self, target_id: UUID, user_id: UUID, /) -> Review | None:
         stmt = select(ReviewModel).where(

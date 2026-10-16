@@ -8,7 +8,26 @@ from src.core import CurrentUser
 from src.modules.auth.domain.models import RefreshToken, RevokedTokenDTO
 
 if TYPE_CHECKING:
-    from src.modules.users import UserCredentialsDTO
+    from src.core import IUnitOfWork
+
+
+class IUserCredentials(Protocol):
+    """Мінімальний протокол облікових даних користувача для перевірки автентифікації."""
+
+    @property
+    def id(self) -> UUID: ...
+
+    @property
+    def username(self) -> str: ...
+
+    @property
+    def password_hash(self) -> str: ...
+
+    @property
+    def role_code(self) -> str: ...
+
+    @property
+    def is_active(self) -> bool: ...
 
 
 class IRefreshTokenRepository(Protocol):
@@ -41,14 +60,25 @@ class IRefreshTokenRepository(Protocol):
 class IUserAuthGateway(Protocol):
     """Протокол шлюзу до модуля Users для перевірки креденшалів."""
 
-    async def get_credentials_by_username(self, username: str) -> UserCredentialsDTO | None:
+    async def get_credentials_by_username(self, username: str) -> IUserCredentials | None:
         """Отримання облікових даних (credentials) користувача за логіном."""
         ...
 
-    async def get_credentials_by_id(self, user_id: UUID) -> UserCredentialsDTO | None:
+    async def get_credentials_by_id(self, user_id: UUID) -> IUserCredentials | None:
         """Отримання облікових даних (credentials) користувача за ID."""
         ...
 
     async def get_cached_current_user(self, user_id: UUID) -> CurrentUser | None:
         """Отримання кешованих даних профілю користувача з ефективними правами."""
+        ...
+
+    async def register_public_user(
+        self,
+        username: str,
+        name: str,
+        password: str,
+        *,
+        external_uow: IUnitOfWork | None = None,
+    ) -> IUserCredentials:
+        """Публічна реєстрація користувача з роллю за замовчуванням 'user'."""
         ...

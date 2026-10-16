@@ -9,7 +9,9 @@ from src.modules.reviews.domain.events import (
     ReviewUpdatedEvent,
     ReviewVotedEvent,
     TargetCreatedEvent,
+    TargetDeletedEvent,
     TargetRatingRecalculatedEvent,
+    TargetUpdatedEvent,
 )
 from src.tasks.dispatcher import get_task_dispatcher
 
@@ -21,6 +23,7 @@ async def handle_review_mutation_event(event: BaseEvent) -> None:
     2. Асинхронно ставить задачу в ARQ воркер на перерахунок байєсівського рейтингу.
     """
     await clear_cache_with_dependencies(settings.cache.namespace.reviews)
+    await clear_cache_with_dependencies(settings.cache.namespace.targets)
 
     target_id = getattr(event, "target_id", None)
     if target_id is not None:
@@ -40,12 +43,19 @@ async def handle_target_mutation_event(event: BaseEvent) -> None:
     await clear_cache_with_dependencies(settings.cache.namespace.targets)
 
 
+async def handle_review_voted_event(event: BaseEvent) -> None:
+    """Інвалідація простору імен відгуків у Redis після голосування за корисність."""
+    await clear_cache_with_dependencies(settings.cache.namespace.reviews)
+
+
 def register_reviews_event_handlers(bus: AsyncEventBus) -> None:
     """Реєстрація слухачів подій модуля reviews у шині подій."""
     bus.on(TargetCreatedEvent)(handle_target_mutation_event)
+    bus.on(TargetUpdatedEvent)(handle_target_mutation_event)
+    bus.on(TargetDeletedEvent)(handle_target_mutation_event)
     bus.on(TargetRatingRecalculatedEvent)(handle_target_mutation_event)
 
     bus.on(ReviewCreatedEvent)(handle_review_mutation_event)
     bus.on(ReviewUpdatedEvent)(handle_review_mutation_event)
     bus.on(ReviewDeletedEvent)(handle_review_mutation_event)
-    bus.on(ReviewVotedEvent)(handle_review_mutation_event)
+    bus.on(ReviewVotedEvent)(handle_review_voted_event)

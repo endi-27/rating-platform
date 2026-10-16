@@ -16,9 +16,14 @@ class DeletionAction(StrEnum):
 class DeletionRelationDTO(BaseModel):
     """Інформація про залежні сутності, що блокують або впливають на видалення."""
 
-    model_config = ConfigDict(from_attributes=True)
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
 
-    entity_type: Annotated[str, Field(description="Тип залежної сутності (наприклад, 'users', 'orders')")]
+    entity_type: Annotated[
+        str,
+        Field(
+            description="Тип залежної сутності (наприклад, 'users', 'reviews')",
+        ),
+    ]
     count: Annotated[int, Field(ge=0, description="Кількість зв'язаних записів")]
 
 

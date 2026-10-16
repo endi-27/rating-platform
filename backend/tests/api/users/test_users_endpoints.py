@@ -2,6 +2,7 @@ from typing import Any
 
 import pytest
 from httpx import AsyncClient
+from sqlalchemy.ext.asyncio import AsyncSession
 from uuid6 import uuid7
 
 from src.core import settings
@@ -688,3 +689,109 @@ async def test_delete_user_and_preview_endpoints(
     sa_del_by_admin = await api_client.delete(f"/api/v1/users/{superadmin_user.id}", cookies=admin_cookies)
     assert sa_del_by_admin.status_code in (403, 409)
     assert sa_del_by_admin.json()["error_code"] in ("SUPER_ADMIN_PROTECTED", "CONFLICT")
+
+
+@pytest.mark.asyncio
+async def test_delete_preview_user_with_reviews_recommends_deactivate(
+    api_client: AsyncClient,
+    superadmin_cookies: dict[str, str],
+    viewer_role: RoleModel,
+    db_session: AsyncSession,
+) -> None:
+    """Якщо користувач має відгуки, delete-preview повертає action='deactivate' та залежність 'reviews'."""
+    from src.modules.reviews.infrastructure.models.review_model import ReviewModel
+    from src.modules.reviews.infrastructure.models.target_model import TargetModel
+
+    # 1. Створюємо цільового користувача
+    uname = f"rev_author_{uuid7().hex[:6]}"
+    create_resp = await api_client.post(
+        "/api/v1/users",
+        json={
+            "username": uname,
+            "name": "Review Author",
+            "password": "Password123!",
+            "role_id": str(viewer_role.id),
+        },
+        cookies=superadmin_cookies,
+    )
+    user_id = create_resp.json()["id"]
+
+    # 2. Створюємо таргет та відгук для цього користувача напряму в БД
+    target = TargetModel(
+        id=uuid7(),
+        slug=f"del-prev-target-{uuid7().hex[:6]}",
+        title="Delete Preview Target",
+        category="movie",
+    )
+    db_session.add(target)
+    await db_session.flush()
+
+    review = ReviewModel(
+        id=uuid7(),
+        target_id=target.id,
+        user_id=user_id,
+        score=5,
+        content="Great movie with insightful storyline.",
+        status="published",
+    )
+    db_session.add(review)
+    await db_session.flush()
+
+    # 3. Запит delete-preview
+    prev_resp = await api_client.get(f"/api/v1/users/{user_id}/delete-preview", cookies=superadmin_cookies)
+    assert prev_resp.status_code == 200
+    prev_data = prev_resp.json()
+    assert prev_data["action"] == "deactivate"
+    assert any(dep["entity_type"] == "reviews" and dep["count"] >= 1 for dep in prev_data["dependencies"])
+
+
+@pytest.mark.asyncio
+async def test_users_unhappy_paths_and_delete_preview_restrictions(
+    api_client: AsyncClient,
+    superadmin_cookies: dict[str, str],
+    superadmin_user: UserModel,
+    admin_cookies: dict[str, str],
+    admin_user_with_permissions: UserModel,
+) -> None:
+    non_existent_id = uuid7()
+
+    # 1. 401 Unauthorized without auth
+    assert (
+        await api_client.patch(f"/api/v1/users/{non_existent_id}/deactivate", json={"version": 1})
+    ).status_code == 401
+    assert (await api_client.patch(f"/api/v1/users/{non_existent_id}/restore", json={"version": 1})).status_code == 401
+    assert (await api_client.delete(f"/api/v1/users/{non_existent_id}")).status_code == 401
+    assert (await api_client.get(f"/api/v1/users/{non_existent_id}/delete-preview")).status_code == 401
+
+    # 2. 404 Not Found with admin cookies
+    assert (
+        await api_client.patch(
+            f"/api/v1/users/{non_existent_id}/deactivate", json={"version": 1}, cookies=superadmin_cookies
+        )
+    ).status_code == 404
+    assert (
+        await api_client.patch(
+            f"/api/v1/users/{non_existent_id}/restore", json={"version": 1}, cookies=superadmin_cookies
+        )
+    ).status_code == 404
+    assert (await api_client.delete(f"/api/v1/users/{non_existent_id}", cookies=superadmin_cookies)).status_code == 404
+
+    # 3. GET /users/{id}/delete-preview for non-existent ID -> action: blocked, restriction: not_found
+    res_not_found = await api_client.get(f"/api/v1/users/{non_existent_id}/delete-preview", cookies=superadmin_cookies)
+    assert res_not_found.status_code == 200
+    assert res_not_found.json()["action"] == "blocked"
+    assert res_not_found.json()["restriction"]["code"] == "not_found"
+
+    # 4. GET /users/{id}/delete-preview for SuperAdmin -> action: blocked, restriction: protected_resource
+    res_sa = await api_client.get(f"/api/v1/users/{superadmin_user.id}/delete-preview", cookies=admin_cookies)
+    assert res_sa.status_code == 200
+    assert res_sa.json()["action"] == "blocked"
+    assert res_sa.json()["restriction"]["code"] == "protected_resource"
+
+    # 5. GET /users/{id}/delete-preview for self (admin checking self) -> action: blocked, restriction: self_delete
+    res_self = await api_client.get(
+        f"/api/v1/users/{admin_user_with_permissions.id}/delete-preview", cookies=admin_cookies
+    )
+    assert res_self.status_code == 200
+    assert res_self.json()["action"] == "blocked"
+    assert res_self.json()["restriction"]["code"] == "self_delete"

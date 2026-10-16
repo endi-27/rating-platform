@@ -331,7 +331,17 @@ class UserQueryService(BaseQueryService):
                 ),
             )
 
-        dependencies: list[DeletionRelationDTO] = []  # TODO: додати перевірки на залежності від інших сутностей
+        dependencies: list[DeletionRelationDTO] = []
+        from src.modules.reviews.infrastructure.models.review_model import ReviewModel
+
+        stmt_reviews = select(func.count(ReviewModel.id)).where(
+            ReviewModel.user_id == user_id,
+            ReviewModel.deleted_at.is_(None),
+        )
+        reviews_count = (await self._session.execute(stmt_reviews)).scalar() or 0
+        if reviews_count > 0:
+            dependencies.append(DeletionRelationDTO(entity_type="reviews", count=reviews_count))
+
         action = DeletionAction.DEACTIVATE if dependencies else DeletionAction.HARD_DELETE
         return DeletionAssessmentDTO(
             resource_id=user_id,

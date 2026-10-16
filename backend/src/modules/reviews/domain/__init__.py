@@ -4,7 +4,9 @@ from src.modules.reviews.domain.events import (
     ReviewUpdatedEvent,
     ReviewVotedEvent,
     TargetCreatedEvent,
+    TargetDeletedEvent,
     TargetRatingRecalculatedEvent,
+    TargetUpdatedEvent,
 )
 from src.modules.reviews.domain.exceptions import (
     InvalidScoreException,
@@ -22,6 +24,7 @@ from src.modules.reviews.domain.interfaces import (
     ITargetRatingRepository,
     ITargetRepository,
     IUserGateway,
+    IUserRecord,
 )
 from src.modules.reviews.domain.models import Review, ReviewVote, Target, TargetRating
 
@@ -31,6 +34,7 @@ __all__ = [
     "ITargetRatingRepository",
     "ITargetRepository",
     "IUserGateway",
+    "IUserRecord",
     "InvalidScoreException",
     "Review",
     "ReviewAlreadyExistsException",
@@ -44,9 +48,11 @@ __all__ = [
     "SelfReviewVoteForbiddenException",
     "Target",
     "TargetCreatedEvent",
+    "TargetDeletedEvent",
     "TargetNotFoundException",
     "TargetRating",
     "TargetRatingRecalculatedEvent",
     "TargetSlugAlreadyExistsException",
+    "TargetUpdatedEvent",
     "UserNotFoundException",
 ]

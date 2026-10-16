@@ -103,7 +103,13 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(["target_id"], ["targets.id"], name=op.f("fk_reviews_target_id_targets"), ondelete="CASCADE"),
         sa.ForeignKeyConstraint(["user_id"], ["users.id"], name=op.f("fk_reviews_user_id_users"), ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id", name=op.f("pk_reviews")),
-        sa.UniqueConstraint("target_id", "user_id", name=op.f("uq_reviews_target_user")),
+    )
+    op.create_index(
+        "uq_reviews_target_user_active",
+        "reviews",
+        ["target_id", "user_id"],
+        unique=True,
+        postgresql_where=sa.text("deleted_at IS NULL"),
     )
     op.create_index("ix_reviews_target_status_created", "reviews", ["target_id", "status", "created_at"], unique=False)
     op.create_index(op.f("ix_reviews_target_id"), "reviews", ["target_id"], unique=False)

@@ -178,3 +178,143 @@ async def test_list_targets_sorting_and_filters(
     # 4. Невалідне сортування -> 422 Unprocessable Entity
     resp_inv = await api_client.get("/api/v1/targets", params={"sort": "unsupported_field"})
     assert resp_inv.status_code == 422
+
+
+async def test_update_target_endpoint(
+    api_client: AsyncClient,
+    superadmin_cookies: dict[str, str],
+    no_permissions_cookies: dict[str, str],
+) -> None:
+    # 1. Створення об'єкта
+    slug = f"target-update-{uuid7().hex[:8]}"
+    create_res = await api_client.post(
+        "/api/v1/targets",
+        json={"slug": slug, "title": "Original Title", "category": "movie"},
+        cookies=superadmin_cookies,
+    )
+    assert create_res.status_code == 201
+    target_id = create_res.json()["id"]
+
+    # 2. Оновлення об'єкта (200 OK)
+    update_payload = {
+        "title": "Updated Title",
+        "category": "cinema",
+        "description": "Updated description.",
+        "metadata": {"updated": True},
+        "version": 1,
+    }
+    update_res = await api_client.put(
+        f"/api/v1/targets/{target_id}",
+        json=update_payload,
+        cookies=superadmin_cookies,
+    )
+    assert update_res.status_code == 200
+    data = update_res.json()
+    assert data["title"] == "Updated Title"
+    assert data["category"] == "cinema"
+    assert data["description"] == "Updated description."
+    assert data["metadata"] == {"updated": True}
+    assert data["version"] == 2
+
+    # 3. OCC Conflict (409 Conflict при передачі застарілої версії)
+    conflict_res = await api_client.put(
+        f"/api/v1/targets/{target_id}",
+        json={**update_payload, "version": 1},
+        cookies=superadmin_cookies,
+    )
+    assert conflict_res.status_code == 409
+    assert conflict_res.json()["error_code"] == "OPTIMISTIC_LOCK_CONFLICT"
+
+    # 4. Forbidden без прав TARGETS_UPDATE
+    forbidden_res = await api_client.put(
+        f"/api/v1/targets/{target_id}",
+        json={**update_payload, "version": 2},
+        cookies=no_permissions_cookies,
+    )
+    assert forbidden_res.status_code == 403
+
+
+async def test_delete_target_endpoint(
+    api_client: AsyncClient,
+    superadmin_cookies: dict[str, str],
+    no_permissions_cookies: dict[str, str],
+) -> None:
+    # 1. Створення об'єкта
+    slug = f"target-delete-{uuid7().hex[:8]}"
+    create_res = await api_client.post(
+        "/api/v1/targets",
+        json={"slug": slug, "title": "Target To Delete", "category": "books"},
+        cookies=superadmin_cookies,
+    )
+    assert create_res.status_code == 201
+    target_id = create_res.json()["id"]
+
+    # 2. Forbidden без прав TARGETS_DELETE
+    forbidden_res = await api_client.delete(
+        f"/api/v1/targets/{target_id}",
+        cookies=no_permissions_cookies,
+    )
+    assert forbidden_res.status_code == 403
+
+    # 3. Успішне видалення (204 No Content)
+    del_res = await api_client.delete(
+        f"/api/v1/targets/{target_id}",
+        cookies=superadmin_cookies,
+    )
+    assert del_res.status_code == 204
+
+    # 4. Перевірка 404 після видалення
+    get_res = await api_client.get(f"/api/v1/targets/{target_id}")
+    assert get_res.status_code == 404
+
+
+async def test_update_and_delete_target_unhappy_paths(
+    api_client: AsyncClient,
+    superadmin_cookies: dict[str, str],
+) -> None:
+    non_existent_id = uuid7()
+    update_payload = {"title": "Valid Title", "category": "movie", "version": 1}
+
+    # 1. PUT 401 Unauthorized
+    put_unauth = await api_client.put(f"/api/v1/targets/{non_existent_id}", json=update_payload)
+    assert put_unauth.status_code == 401
+
+    # 2. PUT 404 Not Found
+    put_404 = await api_client.put(
+        f"/api/v1/targets/{non_existent_id}",
+        json=update_payload,
+        cookies=superadmin_cookies,
+    )
+    assert put_404.status_code == 404
+
+    # 3. PUT 422 Unprocessable Entity (version=0 or empty title)
+    put_422 = await api_client.put(
+        f"/api/v1/targets/{non_existent_id}",
+        json={"title": "", "category": "movie", "version": 0},
+        cookies=superadmin_cookies,
+    )
+    assert put_422.status_code == 422
+
+    # 4. DELETE 401 Unauthorized
+    del_unauth = await api_client.delete(f"/api/v1/targets/{non_existent_id}")
+    assert del_unauth.status_code == 401
+
+    # 5. DELETE 404 Not Found
+    del_404 = await api_client.delete(
+        f"/api/v1/targets/{non_existent_id}",
+        cookies=superadmin_cookies,
+    )
+    assert del_404.status_code == 404
+
+
+async def test_list_targets_filter_min_rating(
+    api_client: AsyncClient,
+    superadmin_cookies: dict[str, str],
+) -> None:
+    response = await api_client.get("/api/v1/targets", params={"min_rating": 4.0})
+    assert response.status_code == 200
+    data = response.json()
+    assert "items" in data
+    for item in data["items"]:
+        if "rating" in item and item["rating"] and "average_score" in item["rating"]:
+            assert float(item["rating"]["average_score"]) >= 4.0

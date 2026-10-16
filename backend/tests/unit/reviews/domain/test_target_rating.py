@@ -143,3 +143,56 @@ def test_calculate_bayesian_score() -> None:
         min_votes_threshold=0,
         global_mean=global_mean,
     ) == Decimal("0.00")
+
+
+def test_apply_updated_review_intermediate_scores() -> None:
+    rating = TargetRating.create_empty(uuid7())
+    rating.apply_new_review(1)
+    assert rating.star_1_count == 1
+
+    # 1 -> 2
+    rating.apply_updated_review(1, 2)
+    assert rating.star_1_count == 0
+    assert rating.star_2_count == 1
+    assert rating.average_score == Decimal("2.00")
+
+    # 2 -> 3
+    rating.apply_updated_review(2, 3)
+    assert rating.star_2_count == 0
+    assert rating.star_3_count == 1
+    assert rating.average_score == Decimal("3.00")
+
+    # 3 -> 4
+    rating.apply_updated_review(3, 4)
+    assert rating.star_3_count == 0
+    assert rating.star_4_count == 1
+    assert rating.average_score == Decimal("4.00")
+
+    # 4 -> 2
+    rating.apply_updated_review(4, 2)
+    assert rating.star_4_count == 0
+    assert rating.star_2_count == 1
+    assert rating.average_score == Decimal("2.00")
+
+
+def test_apply_deleted_review_all_scores() -> None:
+    rating = TargetRating.create_empty(uuid7())
+    for s in (1, 2, 4):
+        rating.apply_new_review(s)
+
+    assert rating.star_1_count == 1
+    assert rating.star_2_count == 1
+    assert rating.star_4_count == 1
+    assert rating.total_reviews == 3
+
+    rating.apply_deleted_review(1)
+    assert rating.star_1_count == 0
+    assert rating.total_reviews == 2
+
+    rating.apply_deleted_review(2)
+    assert rating.star_2_count == 0
+    assert rating.total_reviews == 1
+
+    rating.apply_deleted_review(4)
+    assert rating.star_4_count == 0
+    assert rating.total_reviews == 0

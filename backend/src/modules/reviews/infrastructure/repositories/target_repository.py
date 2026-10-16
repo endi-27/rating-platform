@@ -24,6 +24,7 @@ class SqlAlchemyTargetRepository(SqlAlchemyBaseCrudRepository[Target, TargetMode
         else:
             TargetMapper.update_to_orm(orm, target)
         await self._session.flush()
+        target.version = orm.version
 
     async def get_by_slug(self, slug: str, /) -> Target | None:
         stmt = select(TargetModel).where(
