@@ -17,6 +17,7 @@ if str(backend_dir) not in sys.path:
     sys.path.insert(0, str(backend_dir))
 
 import src.modules.auth.infrastructure.models  # noqa: F401, E402
+import src.modules.reviews.infrastructure.models  # noqa: F401, E402
 import src.modules.users.infrastructure.models  # noqa: F401, E402
 from src.core import settings  # noqa: E402
 from src.infrastructure.db import Base  # noqa: E402

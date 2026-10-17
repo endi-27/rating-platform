@@ -14,6 +14,7 @@ from src.modules.auth.domain.events import (
 from src.modules.auth.domain.interfaces import (
     IRefreshTokenRepository,
     IUserAuthGateway,
+    IUserCredentials,
 )
 from src.modules.auth.domain.models import RefreshToken, RevokedTokenDTO
 
@@ -21,6 +22,7 @@ __all__ = [
     "AuthOperationStatus",
     "IRefreshTokenRepository",
     "IUserAuthGateway",
+    "IUserCredentials",
     "LoginFailedEvent",
     "LoginFailureReason",
     "RefreshToken",

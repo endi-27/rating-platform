@@ -4,6 +4,7 @@ from src.core import (
     ForbiddenException,
     NotFoundException,
     ProtectedResourceException,
+    UserAlreadyExistsException,
 )
 
 
@@ -28,11 +29,8 @@ class PermissionNotFoundError(NotFoundException):
     default_message: str = "Право доступу не знайдено."
 
 
-class UserAlreadyExistsError(ConflictException):
+class UserAlreadyExistsError(UserAlreadyExistsException):
     """Користувач із таким логіном вже існує."""
-
-    default_error_code: str = "USER_ALREADY_EXISTS"
-    default_message: str = "Користувач із таким логіном вже існує."
 
 
 class RoleAlreadyExistsError(ConflictException):
@@ -61,3 +59,16 @@ class InactiveRoleAssignmentError(DomainException):
 
     default_error_code: str = "INACTIVE_ROLE_ASSIGNMENT"
     default_message: str = "Неможливо призначити користувачу деактивовану роль."
+
+
+__all__ = [
+    "InactiveRoleAssignmentError",
+    "PermissionNotFoundError",
+    "RoleAlreadyExistsError",
+    "RoleNotFoundError",
+    "SelfActionForbiddenError",
+    "SuperAdminProtectionError",
+    "UserAlreadyExistsError",
+    "UserAlreadyExistsException",
+    "UserNotFoundError",
+]

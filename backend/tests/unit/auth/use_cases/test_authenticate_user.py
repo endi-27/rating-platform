@@ -31,8 +31,8 @@ def _create_test_user(
 ) -> User:
     role = Role(
         id=uuid7(),
-        code=SystemRole.VIEWER.value,
-        name="Глядач",
+        code=SystemRole.USER.value,
+        name="Користувач",
         permissions=set(),
     )
     user = User(

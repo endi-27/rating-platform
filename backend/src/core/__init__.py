@@ -36,6 +36,7 @@ from src.core.exceptions import (
     ResourceAlreadyInactiveException,
     ResourceLockedException,
     UnauthorizedException,
+    UserAlreadyExistsException,
 )
 from src.core.limiter import limiter
 from src.core.logger import logger, setup_logging, setup_worker_logging
@@ -43,6 +44,7 @@ from src.core.masking import MASKED_VALUE, is_sensitive_key, mask_sensitive_data
 from src.core.protocols import (
     IEventBus,
     IPasswordHasher,
+    ISetBuffer,
     IUnitOfWork,
 )
 from src.core.redis import close_redis, get_redis_client, get_redis_pool
@@ -71,6 +73,7 @@ __all__ = [
     "ForbiddenException",
     "IEventBus",
     "IPasswordHasher",
+    "ISetBuffer",
     "IUnitOfWork",
     "InactiveEntityError",
     "InvalidCredentialsException",
@@ -86,6 +89,7 @@ __all__ = [
     "Settings",
     "SystemRole",
     "UnauthorizedException",
+    "UserAlreadyExistsException",
     "async_session_factory",
     "close_db",
     "close_redis",

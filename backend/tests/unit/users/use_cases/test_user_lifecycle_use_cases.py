@@ -57,7 +57,7 @@ def _make_actor(
     )
 
 
-def _make_role(code: str = SystemRole.VIEWER.value, name: str = "Глядач") -> Role:
+def _make_role(code: str = SystemRole.USER.value, name: str = "Користувач") -> Role:
     return Role(id=uuid7(), code=code, name=name, permissions=set())
 
 

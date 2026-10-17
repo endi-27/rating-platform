@@ -6,6 +6,7 @@ from uuid6 import uuid7
 from src.core import (
     InactiveEntityError,
     PermissionCode,
+    ResourceAlreadyActiveException,
     ResourceAlreadyInactiveException,
     SystemRole,
 )
@@ -24,8 +25,8 @@ def _make_perm(code: PermissionCode) -> Permission:
 
 
 def _make_role(
-    code: str = SystemRole.VIEWER.value,
-    name: str = "Глядач",
+    code: str = SystemRole.USER.value,
+    name: str = "Користувач",
     permissions: list[Permission] | None = None,
     is_active: bool = True,
 ) -> Role:
@@ -355,3 +356,37 @@ def test_user_soft_delete_already_inactive_raises() -> None:
 
     with pytest.raises(ResourceAlreadyInactiveException):
         user.soft_delete()
+
+
+def test_user_restore_success() -> None:
+    role = _make_role()
+    user = User.register(username="helen", name="Helen", password_hash="pw", role=role)
+    user.soft_delete()
+    assert user.is_active is False
+
+    user.restore()
+    assert user.is_active is True
+    assert user.deleted_at is None
+
+
+def test_user_restore_already_active_raises() -> None:
+    role = _make_role()
+    user = User.register(username="helen", name="Helen", password_hash="pw", role=role)
+    with pytest.raises(ResourceAlreadyActiveException):
+        user.restore()
+
+
+def test_user_custom_permissions_list_converted_to_set() -> None:
+    p = _make_perm(PermissionCode.USERS_READ)
+    role = _make_role()
+    user = User(
+        id=uuid7(),
+        username="list_user",
+        name="List User",
+        password_hash="pw",
+        role_id=role.id,
+        role=role,
+        custom_permissions=[p],  # type: ignore[arg-type]
+    )
+    assert isinstance(user.custom_permissions, set)
+    assert user.custom_permissions == {p}

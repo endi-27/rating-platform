@@ -38,3 +38,44 @@ async def test_health_check_endpoint_success(api_client: AsyncClient) -> None:
     # Діагностичні заголовки
     assert response.headers.get("X-Instance-ID") is not None
     assert response.headers.get("X-Process-Time-Ms") is not None
+
+
+@pytest.mark.asyncio
+async def test_simulate_latency_header(api_client: AsyncClient) -> None:
+    """Перевірка симуляції асиметричної затримки через заголовок X-Simulate-Latency-Ms (ЛР №3)."""
+    response = await api_client.get(
+        "/api/v1/health",
+        headers={"X-Simulate-Latency-Ms": "50"},
+    )
+    assert response.status_code == 200
+    assert response.headers.get("X-Instance-ID") is not None
+    assert response.headers.get("X-Process-Time-Ms") is not None
+    # Затримка має бути не менше 40 мс з урахуванням накладних витрат
+    assert float(response.headers["X-Process-Time-Ms"]) >= 40.0
+
+
+@pytest.mark.asyncio
+async def test_cached_endpoint_headers(
+    api_client: AsyncClient,
+    superadmin_cookies: dict[str, str],
+) -> None:
+    """Перевірка розподіленого кешу та заголовка X-Cache (MISS -> HIT) на ендпоінтах з @cache (ЛР №4)."""
+    from uuid6 import uuid7
+
+    slug = f"cache-test-{uuid7().hex[:8]}"
+    create_res = await api_client.post(
+        "/api/v1/targets",
+        json={"title": "Cache Test Target", "slug": slug, "category": "books"},
+        cookies=superadmin_cookies,
+    )
+    assert create_res.status_code == 201
+
+    # 1. Перший запит: кеш-промах (MISS)
+    res_miss = await api_client.get(f"/api/v1/targets/{slug}")
+    assert res_miss.status_code == 200
+    assert res_miss.headers.get("X-Cache") == "MISS"
+
+    # 2. Другий запит: потрапляння в кеш (HIT)
+    res_hit = await api_client.get(f"/api/v1/targets/{slug}")
+    assert res_hit.status_code == 200
+    assert res_hit.headers.get("X-Cache") == "HIT"

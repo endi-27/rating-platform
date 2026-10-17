@@ -11,12 +11,15 @@ from sqlalchemy.ext.asyncio import (
 
 # Реєстрація всіх ORM-моделей у Base.metadata для коректної роботи ForeignKey зв'язків у фоновому воркері
 import src.modules.auth.infrastructure.models  # noqa: F401
+import src.modules.reviews.infrastructure.models  # noqa: F401
 import src.modules.users.infrastructure.models  # noqa: F401
 from src.core import logger, set_current_username, settings, setup_worker_logging
+from src.infrastructure import get_set_buffer
 from src.tasks.cron import cron_jobs
 from src.tasks.functions import (
     cleanup_expired_refresh_tokens_task,
     cleanup_expired_temp_files_task,
+    process_dirty_target_ratings_task,
 )
 
 
@@ -50,6 +53,7 @@ async def startup(ctx: dict[str, Any]) -> None:
 
     ctx["engine"] = engine
     ctx["session_factory"] = session_factory
+    ctx["set_buffer"] = get_set_buffer()
 
     logger.info(
         "[ARQ Worker] Воркер успішно запущено. Черга: {queue} | Конкурентність: {max_jobs} задач",
@@ -83,6 +87,7 @@ class WorkerSettings:
     functions = [
         cleanup_expired_temp_files_task,
         cleanup_expired_refresh_tokens_task,
+        process_dirty_target_ratings_task,
     ]
 
     # Список періодичних cron-задач

@@ -15,7 +15,7 @@ async def test_list_roles_success(
     superadmin_cookies: dict[str, str],
 ) -> None:
     """Перевірка отримання списку ролей (200 OK) з пагінацією, фільтрацією та сортуванням."""
-    # 1. Запит за замовчуванням (super_admin виключений за дизайном, повертається viewer)
+    # 1. Запит за замовчуванням (super_admin виключений за дизайном, повертаються admin та user)
     response = await api_client.get("/api/v1/roles", cookies=superadmin_cookies)
     assert response.status_code == 200
 
@@ -26,19 +26,19 @@ async def test_list_roles_success(
     assert "page_size" in data
     assert data["total"] >= 1
     codes = [r["code"] for r in data["items"]]
-    assert "viewer" in codes
+    assert "user" in codes
 
     # 2. Фільтрація за пошуковим словом search
-    search_resp = await api_client.get("/api/v1/roles?search=viewer", cookies=superadmin_cookies)
+    search_resp = await api_client.get("/api/v1/roles?search=user", cookies=superadmin_cookies)
     assert search_resp.status_code == 200
     search_items = search_resp.json()["items"]
-    assert any(r["code"] == "viewer" for r in search_items)
+    assert any(r["code"] == "user" for r in search_items)
 
     # 3. Фільтрація за кодами
-    codes_resp = await api_client.get("/api/v1/roles?codes=viewer", cookies=superadmin_cookies)
+    codes_resp = await api_client.get("/api/v1/roles?codes=user", cookies=superadmin_cookies)
     assert codes_resp.status_code == 200
     assert len(codes_resp.json()["items"]) == 1
-    assert codes_resp.json()["items"][0]["code"] == "viewer"
+    assert codes_resp.json()["items"][0]["code"] == "user"
 
     # 4. Сортування за назвою
     sort_resp = await api_client.get("/api/v1/roles?sort=name&page=1&page_size=10", cookies=superadmin_cookies)
@@ -77,7 +77,7 @@ async def test_get_role_by_id_endpoints(
     assert resp_200.status_code == 200
     data = resp_200.json()
     assert data["id"] == str(viewer_role.id)
-    assert data["code"] == "viewer"
+    assert data["code"] == "user"
     assert "permissions" in data
 
     # 2. 404 Not Found
@@ -381,3 +381,47 @@ async def test_delete_role_and_preview_endpoints(
     assigned_del = await api_client.delete(f"/api/v1/roles/{assigned_role.id}", cookies=superadmin_cookies)
     assert assigned_del.status_code == 409
     assert assigned_del.json()["error_code"] in ("ROLE_ASSIGNED_TO_USERS", "RESOURCE_LOCKED", "CONFLICT")
+
+
+@pytest.mark.asyncio
+async def test_roles_unhappy_paths_401_and_404(
+    api_client: AsyncClient,
+    superadmin_cookies: dict[str, str],
+) -> None:
+    non_existent_id = uuid7()
+    update_payload = {"name": "New Role Name", "permission_ids": [], "version": 1}
+
+    # PUT /roles/{id}
+    assert (await api_client.put(f"/api/v1/roles/{non_existent_id}", json=update_payload)).status_code == 401
+    assert (
+        await api_client.put(f"/api/v1/roles/{non_existent_id}", json=update_payload, cookies=superadmin_cookies)
+    ).status_code == 404
+
+    # DELETE /roles/{id}
+    assert (await api_client.delete(f"/api/v1/roles/{non_existent_id}")).status_code == 401
+    assert (await api_client.delete(f"/api/v1/roles/{non_existent_id}", cookies=superadmin_cookies)).status_code == 404
+
+    # PATCH /roles/{id}/deactivate
+    assert (
+        await api_client.patch(f"/api/v1/roles/{non_existent_id}/deactivate", json={"version": 1})
+    ).status_code == 401
+    assert (
+        await api_client.patch(
+            f"/api/v1/roles/{non_existent_id}/deactivate", json={"version": 1}, cookies=superadmin_cookies
+        )
+    ).status_code == 404
+
+    # PATCH /roles/{id}/restore
+    assert (await api_client.patch(f"/api/v1/roles/{non_existent_id}/restore", json={"version": 1})).status_code == 401
+    assert (
+        await api_client.patch(
+            f"/api/v1/roles/{non_existent_id}/restore", json={"version": 1}, cookies=superadmin_cookies
+        )
+    ).status_code == 404
+
+    # GET /roles/{id}/delete-preview
+    assert (await api_client.get(f"/api/v1/roles/{non_existent_id}/delete-preview")).status_code == 401
+    res_prev = await api_client.get(f"/api/v1/roles/{non_existent_id}/delete-preview", cookies=superadmin_cookies)
+    assert res_prev.status_code == 200
+    assert res_prev.json()["action"] == "blocked"
+    assert res_prev.json()["restriction"]["code"] == "not_found"

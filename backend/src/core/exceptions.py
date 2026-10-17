@@ -44,6 +44,13 @@ class ConflictException(AppException):
     default_message: str = "Конфлікт стану ресурсу."
 
 
+class UserAlreadyExistsException(ConflictException):
+    """Виняток спроби створення або реєстрації користувача з уже зайнятим логіном."""
+
+    default_error_code: str = "USER_ALREADY_EXISTS"
+    default_message: str = "Користувач із таким логіном вже існує."
+
+
 class OptimisticLockConflictException(ConflictException):
     """Виняток конфлікту оптимістичного блокування (OCC) за версією."""
 

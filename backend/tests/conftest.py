@@ -141,6 +141,7 @@ def init_test_cache() -> None:
         InMemoryBackend(),
         prefix="test-cache",
         key_builder=default_key_builder,
+        cache_status_header="X-Cache",
     )
 
 

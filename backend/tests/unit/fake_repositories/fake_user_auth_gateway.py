@@ -1,8 +1,11 @@
 from uuid import UUID
 
-from src.core import CurrentUser, CurrentUserRole
+from uuid6 import uuid7
+
+from src.core import CurrentUser, CurrentUserRole, IUnitOfWork, UserAlreadyExistsException
 from src.modules.auth.domain import IUserAuthGateway
 from src.modules.users import UserCredentialsDTO
+from src.modules.users.domain.models import Role, User
 from tests.unit.fake_repositories.fake_user_repository import FakeUserRepository
 
 
@@ -53,4 +56,31 @@ class FakeUserAuthGateway(IUserAuthGateway):
             effective_permissions=user.effective_permissions,
             created_at=user.created_at,
             updated_at=user.updated_at,
+        )
+
+    async def register_public_user(
+        self,
+        username: str,
+        name: str,
+        password: str,
+        *,
+        external_uow: IUnitOfWork | None = None,
+    ) -> UserCredentialsDTO:
+        if await self._user_repo.exists_by_username(username):
+            raise UserAlreadyExistsException(f"Користувач з логіном '{username}' вже існує.")
+
+        role = Role(id=uuid7(), code="user", name="Користувач")
+        user = User.register(
+            username=username,
+            name=name,
+            password_hash=password + "_hash",
+            role=role,
+        )
+        await self._user_repo.save(user)
+        return UserCredentialsDTO(
+            id=user.id,
+            username=user.username,
+            password_hash=user.password_hash,
+            role_code=role.code,
+            is_active=user.is_active,
         )

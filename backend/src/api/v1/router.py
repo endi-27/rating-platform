@@ -5,6 +5,7 @@ from sqlalchemy import text
 
 from src.core import db_router, get_redis_client, settings
 from src.modules.auth.router import auth_router
+from src.modules.reviews.routers import reviews_router, targets_router
 from src.modules.users.routers import (
     permissions_router,
     roles_router,
@@ -60,3 +61,5 @@ api_v1_router.include_router(auth_router)
 api_v1_router.include_router(users_router)
 api_v1_router.include_router(roles_router)
 api_v1_router.include_router(permissions_router)
+api_v1_router.include_router(targets_router)
+api_v1_router.include_router(reviews_router)

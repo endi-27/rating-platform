@@ -1,0 +1,133 @@
+from decimal import Decimal
+from typing import Annotated
+from uuid import UUID
+
+from fastapi import APIRouter, Depends, Query, status
+from fastapi_cache.decorator import cache
+
+from src.api.schemas.pagination import PaginatedResponse, PaginationParams
+from src.api.schemas.sorting import MultiSort, sort_dependency
+from src.core import CurrentUser, PermissionCode, settings
+from src.modules.auth import require_permission
+from src.modules.reviews.application.dto import (
+    CreateTargetDTO,
+    TargetResponseDTO,
+    UpdateTargetDTO,
+)
+from src.modules.reviews.application.use_cases import (
+    CreateTargetUseCase,
+    DeleteTargetUseCase,
+    UpdateTargetUseCase,
+)
+from src.modules.reviews.dependencies import (
+    get_create_target_uc,
+    get_delete_target_uc,
+    get_target_query_service,
+    get_update_target_uc,
+)
+from src.modules.reviews.domain.exceptions import TargetNotFoundException
+from src.modules.reviews.queries import (
+    TargetFilterDTO,
+    TargetQueryService,
+    TargetSortField,
+)
+
+router = APIRouter(prefix="/targets", tags=["Targets"])
+
+
+@router.post(
+    "",
+    response_model=TargetResponseDTO,
+    status_code=status.HTTP_201_CREATED,
+    summary="Створення об'єкта оцінювання",
+    description="Створює новий Target та ініціалізує порожній знімок рейтингу. Вимагає дозволу TARGETS_CREATE.",
+)
+async def create_target(
+    payload: CreateTargetDTO,
+    use_case: Annotated[CreateTargetUseCase, Depends(get_create_target_uc)],
+    query_service: Annotated[TargetQueryService, Depends(get_target_query_service)],
+    current_user: Annotated[CurrentUser, Depends(require_permission(PermissionCode.TARGETS_CREATE))],
+) -> TargetResponseDTO:
+    target_id = await use_case.execute(payload, created_by_id=current_user.id)
+    target = await query_service.get_by_id(target_id)
+    if target is None:
+        raise TargetNotFoundException(target_id)
+    return target
+
+
+@router.get(
+    "",
+    response_model=PaginatedResponse[TargetResponseDTO],
+    summary="Каталог об'єктів оцінювання",
+    description="Публічний перегляд списку об'єктів із фільтрацією, мульти-сортуванням та пагінацією (CQRS Read).",
+)
+async def list_targets(
+    pagination: Annotated[PaginationParams, Depends()],
+    sort: Annotated[
+        MultiSort[TargetSortField],
+        Depends(sort_dependency(TargetSortField, default=("-created_at",), max_fields=2)),
+    ],
+    query_service: Annotated[TargetQueryService, Depends(get_target_query_service)],
+    category: Annotated[str | None, Query(description="Фільтр за категорією")] = None,
+    search: Annotated[str | None, Query(description="Пошук за назвою або слагом")] = None,
+    min_rating: Annotated[Decimal | None, Query(ge=0, le=5, description="Мінімальний середній бал")] = None,
+) -> PaginatedResponse[TargetResponseDTO]:
+    filters = TargetFilterDTO(
+        category=category,
+        search=search,
+        min_rating=min_rating,
+        include_inactive=False,
+    )
+    return await query_service.get_all(pagination=pagination, sort=sort, filters=filters)
+
+
+@router.get(
+    "/{id_or_slug}",
+    response_model=TargetResponseDTO,
+    summary="Картка об'єкта оцінювання",
+    description="Отримання детальної інформації про об'єкт за UUID або текстовим slug із кешуванням Redis.",
+)
+@cache(expire=settings.cache.targets_expire, namespace=settings.cache.namespace.targets)
+async def get_target_details(
+    id_or_slug: str,
+    query_service: Annotated[TargetQueryService, Depends(get_target_query_service)],
+) -> TargetResponseDTO:
+    target = await query_service.get_by_id_or_slug(id_or_slug)
+    if target is None:
+        raise TargetNotFoundException(id_or_slug)
+    return target
+
+
+@router.put(
+    "/{target_id}",
+    response_model=TargetResponseDTO,
+    status_code=status.HTTP_200_OK,
+    summary="Оновлення об'єкта оцінювання",
+    description="Повне оновлення об'єкта оцінювання з перевіркою версії (OCC). Вимагає дозволу TARGETS_UPDATE.",
+)
+async def update_target(
+    target_id: UUID,
+    payload: UpdateTargetDTO,
+    use_case: Annotated[UpdateTargetUseCase, Depends(get_update_target_uc)],
+    query_service: Annotated[TargetQueryService, Depends(get_target_query_service)],
+    current_user: Annotated[CurrentUser, Depends(require_permission(PermissionCode.TARGETS_UPDATE))],
+) -> TargetResponseDTO:
+    await use_case.execute(target_id=target_id, dto=payload)
+    target = await query_service.get_by_id(target_id)
+    if target is None:
+        raise TargetNotFoundException(target_id)
+    return target
+
+
+@router.delete(
+    "/{target_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Видалення об'єкта оцінювання",
+    description="Видаляє об'єкт оцінювання. Вимагає дозволу TARGETS_DELETE.",
+)
+async def delete_target(
+    target_id: UUID,
+    use_case: Annotated[DeleteTargetUseCase, Depends(get_delete_target_uc)],
+    current_user: Annotated[CurrentUser, Depends(require_permission(PermissionCode.TARGETS_DELETE))],
+) -> None:
+    await use_case.execute(target_id=target_id)

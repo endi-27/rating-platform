@@ -1,0 +1,753 @@
+from collections.abc import Callable
+from typing import Any
+
+from httpx import AsyncClient
+from sqlalchemy.ext.asyncio import AsyncSession
+from uuid6 import uuid7
+
+from src.core import default_password_hasher
+from src.modules.users.infrastructure.models import RoleModel, UserModel
+
+
+async def _create_user(
+    db_session: AsyncSession,
+    user_role: RoleModel,
+    prefix: str = "rev_user",
+) -> UserModel:
+    user = UserModel(
+        id=uuid7(),
+        version=1,
+        username=f"{prefix}_{uuid7().hex[:6]}",
+        name="Reviewer User",
+        password_hash=default_password_hasher.hash("TestPass123!"),
+        role_id=user_role.id,
+    )
+    db_session.add(user)
+    await db_session.flush()
+    return user
+
+
+async def test_create_review_happy_path(
+    api_client: AsyncClient,
+    superadmin_cookies: dict[str, str],
+    db_session: AsyncSession,
+    user_role: RoleModel,
+    auth_cookies_factory: Callable[[dict[str, Any] | None], dict[str, str]],
+) -> None:
+    # 1. Створюємо Target
+    slug = f"target-{uuid7().hex[:8]}"
+    target_resp = await api_client.post(
+        "/api/v1/targets",
+        json={"slug": slug, "title": "Inception", "category": "movie"},
+        cookies=superadmin_cookies,
+    )
+    assert target_resp.status_code == 201
+    target_id = target_resp.json()["id"]
+
+    # 2. Звичайний зареєстрований користувач створює відгук
+    user = await _create_user(db_session, user_role)
+    user_cookies = auth_cookies_factory({"sub": str(user.id), "role": "user"})
+
+    review_payload = {
+        "score": 5,
+        "title": "Mind-bending masterpiece!",
+        "content": "One of the best sci-fi movies ever created. Superb direction and acting.",
+    }
+
+    resp = await api_client.post(
+        f"/api/v1/targets/{target_id}/reviews",
+        json=review_payload,
+        cookies=user_cookies,
+    )
+    assert resp.status_code == 201
+    review_data = resp.json()
+    assert review_data["score"] == 5
+    assert review_data["title"] == "Mind-bending masterpiece!"
+    assert review_data["status"] == "published"
+    assert review_data["target_id"] == target_id
+    assert review_data["user_id"] == str(user.id)
+
+
+async def test_create_review_unauthorized(
+    api_client: AsyncClient,
+    superadmin_cookies: dict[str, str],
+) -> None:
+    slug = f"target-{uuid7().hex[:8]}"
+    target_resp = await api_client.post(
+        "/api/v1/targets",
+        json={"slug": slug, "title": "Target Unauth", "category": "book"},
+        cookies=superadmin_cookies,
+    )
+    target_id = target_resp.json()["id"]
+
+    response = await api_client.post(
+        f"/api/v1/targets/{target_id}/reviews",
+        json={"score": 4, "content": "Attempting to post without auth token header."},
+    )
+    assert response.status_code == 401
+
+
+async def test_create_review_forbidden(
+    api_client: AsyncClient,
+    superadmin_cookies: dict[str, str],
+    no_permissions_cookies: dict[str, str],
+) -> None:
+    slug = f"target-{uuid7().hex[:8]}"
+    target_resp = await api_client.post(
+        "/api/v1/targets",
+        json={"slug": slug, "title": "Target Forbidden", "category": "book"},
+        cookies=superadmin_cookies,
+    )
+    target_id = target_resp.json()["id"]
+
+    response = await api_client.post(
+        f"/api/v1/targets/{target_id}/reviews",
+        json={"score": 4, "content": "Attempting to post without reviews:create permission."},
+        cookies=no_permissions_cookies,
+    )
+    assert response.status_code == 403
+    assert response.json()["error_code"] == "FORBIDDEN"
+
+
+async def test_create_review_target_not_found(
+    api_client: AsyncClient,
+    superadmin_cookies: dict[str, str],
+) -> None:
+    response = await api_client.post(
+        f"/api/v1/targets/{uuid7()}/reviews",
+        json={"score": 4, "content": "Review for non-existent target in database."},
+        cookies=superadmin_cookies,
+    )
+    assert response.status_code == 404
+
+
+async def test_create_review_one_review_rule_conflict(
+    api_client: AsyncClient,
+    superadmin_cookies: dict[str, str],
+    db_session: AsyncSession,
+    user_role: RoleModel,
+    auth_cookies_factory: Callable[[dict[str, Any] | None], dict[str, str]],
+) -> None:
+    slug = f"target-{uuid7().hex[:8]}"
+    target_resp = await api_client.post(
+        "/api/v1/targets",
+        json={"slug": slug, "title": "Single Target", "category": "game"},
+        cookies=superadmin_cookies,
+    )
+    target_id = target_resp.json()["id"]
+
+    user = await _create_user(db_session, user_role)
+    user_cookies = auth_cookies_factory({"sub": str(user.id), "role": "user"})
+    payload = {"score": 5, "content": "First valid review on the target."}
+
+    # Перший відгук успішний
+    resp1 = await api_client.post(
+        f"/api/v1/targets/{target_id}/reviews",
+        json=payload,
+        cookies=user_cookies,
+    )
+    assert resp1.status_code == 201
+
+    # Другий відгук від того самого користувача -> 409 Conflict
+    resp2 = await api_client.post(
+        f"/api/v1/targets/{target_id}/reviews",
+        json=payload,
+        cookies=user_cookies,
+    )
+    assert resp2.status_code == 409
+
+
+async def test_create_review_validation_errors(
+    api_client: AsyncClient,
+    superadmin_cookies: dict[str, str],
+) -> None:
+    target_id = uuid7()
+
+    # Invalid score (> 5)
+    resp_score = await api_client.post(
+        f"/api/v1/targets/{target_id}/reviews",
+        json={"score": 6, "content": "Valid content length."},
+        cookies=superadmin_cookies,
+    )
+    assert resp_score.status_code == 422
+
+    # Content too short (< 10)
+    resp_short = await api_client.post(
+        f"/api/v1/targets/{target_id}/reviews",
+        json={"score": 5, "content": "Short"},
+        cookies=superadmin_cookies,
+    )
+    assert resp_short.status_code == 422
+
+
+async def test_get_target_reviews_and_rating(
+    api_client: AsyncClient,
+    superadmin_cookies: dict[str, str],
+    db_session: AsyncSession,
+    user_role: RoleModel,
+    auth_cookies_factory: Callable[[dict[str, Any] | None], dict[str, str]],
+) -> None:
+    slug = f"target-{uuid7().hex[:8]}"
+    target_resp = await api_client.post(
+        "/api/v1/targets",
+        json={"slug": slug, "title": "Alien Movie", "category": "movie"},
+        cookies=superadmin_cookies,
+    )
+    target_id = target_resp.json()["id"]
+
+    # Post review
+    user = await _create_user(db_session, user_role)
+    user_cookies = auth_cookies_factory({"sub": str(user.id), "role": "user"})
+    await api_client.post(
+        f"/api/v1/targets/{target_id}/reviews",
+        json={"score": 5, "content": "Excellent horror atmosphere and sound design."},
+        cookies=user_cookies,
+    )
+
+    # Public list reviews (no auth)
+    reviews_resp = await api_client.get(f"/api/v1/targets/{target_id}/reviews")
+    assert reviews_resp.status_code == 200
+    rev_data = reviews_resp.json()
+    assert rev_data["total"] == 1
+    assert len(rev_data["items"]) == 1
+
+    # Public get rating (no auth)
+    rating_resp = await api_client.get(f"/api/v1/targets/{target_id}/rating")
+    assert rating_resp.status_code == 200
+    r_data = rating_resp.json()
+    assert r_data["total_reviews"] == 1
+    assert float(r_data["average_score"]) == 5.0
+    assert r_data["star_5_count"] == 1
+
+
+async def test_vote_review_endpoints(
+    api_client: AsyncClient,
+    superadmin_cookies: dict[str, str],
+    no_permissions_cookies: dict[str, str],
+    db_session: AsyncSession,
+    user_role: RoleModel,
+    auth_cookies_factory: Callable[[dict[str, Any] | None], dict[str, str]],
+) -> None:
+    slug = f"target-{uuid7().hex[:8]}"
+    target_resp = await api_client.post(
+        "/api/v1/targets",
+        json={"slug": slug, "title": "Vote Target", "category": "movie"},
+        cookies=superadmin_cookies,
+    )
+    target_id = target_resp.json()["id"]
+
+    author = await _create_user(db_session, user_role, prefix="author")
+    author_cookies = auth_cookies_factory({"sub": str(author.id), "role": "user"})
+
+    rev_resp = await api_client.post(
+        f"/api/v1/targets/{target_id}/reviews",
+        json={"score": 5, "content": "Review that will receive community votes."},
+        cookies=author_cookies,
+    )
+    assert rev_resp.status_code == 201
+    review_id = rev_resp.json()["id"]
+
+    # 1. Без автентифікації -> 401 Unauthorized
+    unauth_vote_resp = await api_client.post(
+        f"/api/v1/reviews/{review_id}/vote",
+        json={"is_helpful": True},
+    )
+    assert unauth_vote_resp.status_code == 401
+
+    # 2. Без дозволу reviews:vote -> 403 Forbidden
+    forb_vote_resp = await api_client.post(
+        f"/api/v1/reviews/{review_id}/vote",
+        json={"is_helpful": True},
+        cookies=no_permissions_cookies,
+    )
+    assert forb_vote_resp.status_code == 403
+    assert forb_vote_resp.json()["error_code"] == "FORBIDDEN"
+
+    # 3. Author votes for own review -> 409 Conflict
+    self_vote_resp = await api_client.post(
+        f"/api/v1/reviews/{review_id}/vote",
+        json={"is_helpful": True},
+        cookies=author_cookies,
+    )
+    assert self_vote_resp.status_code == 409
+
+    # 4. Voter votes helpful -> 200 OK
+    voter = await _create_user(db_session, user_role, prefix="voter")
+    voter_cookies = auth_cookies_factory({"sub": str(voter.id), "role": "user"})
+    vote_resp = await api_client.post(
+        f"/api/v1/reviews/{review_id}/vote",
+        json={"is_helpful": True},
+        cookies=voter_cookies,
+    )
+    assert vote_resp.status_code == 200
+    assert vote_resp.json()["is_helpful"] is True
+
+    # 5. Duplicate vote -> 409 Conflict
+    dup_vote_resp = await api_client.post(
+        f"/api/v1/reviews/{review_id}/vote",
+        json={"is_helpful": True},
+        cookies=voter_cookies,
+    )
+    assert dup_vote_resp.status_code == 409
+
+    # 6. Vote for non-existent review -> 404 Not Found
+    not_found_resp = await api_client.post(
+        f"/api/v1/reviews/{uuid7()}/vote",
+        json={"is_helpful": True},
+        cookies=voter_cookies,
+    )
+    assert not_found_resp.status_code == 404
+
+
+async def test_moderate_review_endpoints(
+    api_client: AsyncClient,
+    superadmin_cookies: dict[str, str],
+    no_permissions_cookies: dict[str, str],
+    db_session: AsyncSession,
+    user_role: RoleModel,
+    auth_cookies_factory: Callable[[dict[str, Any] | None], dict[str, str]],
+) -> None:
+    slug = f"target-{uuid7().hex[:8]}"
+    target_resp = await api_client.post(
+        "/api/v1/targets",
+        json={"slug": slug, "title": "Mod Target", "category": "movie"},
+        cookies=superadmin_cookies,
+    )
+    target_id = target_resp.json()["id"]
+
+    user = await _create_user(db_session, user_role, prefix="spammer")
+    user_cookies = auth_cookies_factory({"sub": str(user.id), "role": "user"})
+    rev_resp = await api_client.post(
+        f"/api/v1/targets/{target_id}/reviews",
+        json={"score": 1, "content": "Spam review with malicious links and ads."},
+        cookies=user_cookies,
+    )
+    assert rev_resp.status_code == 201
+    review_id = rev_resp.json()["id"]
+
+    # 1. Without permission -> 403 Forbidden
+    forb_resp = await api_client.patch(
+        f"/api/v1/reviews/{review_id}/moderate",
+        json={"action": "hide"},
+        cookies=no_permissions_cookies,
+    )
+    assert forb_resp.status_code == 403
+
+    # 2. SuperAdmin (has REVIEWS_MODERATE) hides review -> 200 OK
+    mod_resp = await api_client.patch(
+        f"/api/v1/reviews/{review_id}/moderate",
+        json={"action": "hide"},
+        cookies=superadmin_cookies,
+    )
+    assert mod_resp.status_code == 200
+    assert mod_resp.json()["status"] == "hidden"
+
+    # 3. Invalid action -> 422 Unprocessable Entity
+    inv_resp = await api_client.patch(
+        f"/api/v1/reviews/{review_id}/moderate",
+        json={"action": "destroy"},
+        cookies=superadmin_cookies,
+    )
+    assert inv_resp.status_code == 422
+
+
+async def test_list_reviews_sorting_and_filters(
+    api_client: AsyncClient,
+    superadmin_cookies: dict[str, str],
+    db_session: AsyncSession,
+    user_role: RoleModel,
+    auth_cookies_factory: Callable[[dict[str, Any] | None], dict[str, str]],
+) -> None:
+    slug = f"target-{uuid7().hex[:8]}"
+    target_resp = await api_client.post(
+        "/api/v1/targets",
+        json={"slug": slug, "title": "Reviews Sorting Target", "category": "books"},
+        cookies=superadmin_cookies,
+    )
+    target_id = target_resp.json()["id"]
+
+    # Додаємо два відгуки з різними оцінками
+    u1 = await _create_user(db_session, user_role, prefix="user_a")
+    c1 = auth_cookies_factory({"sub": str(u1.id), "role": "user"})
+    await api_client.post(
+        f"/api/v1/targets/{target_id}/reviews",
+        json={"score": 2, "content": "Not very good, could be better."},
+        cookies=c1,
+    )
+
+    u2 = await _create_user(db_session, user_role, prefix="user_b")
+    c2 = auth_cookies_factory({"sub": str(u2.id), "role": "user"})
+    await api_client.post(
+        f"/api/v1/targets/{target_id}/reviews",
+        json={"score": 5, "content": "Absolute perfection, loved every bit!"},
+        cookies=c2,
+    )
+
+    # 1. Сортування за оцінкою desc
+    resp_desc = await api_client.get(f"/api/v1/targets/{target_id}/reviews", params={"sort": "-score"})
+    assert resp_desc.status_code == 200
+    scores_desc = [r["score"] for r in resp_desc.json()["items"]]
+    assert scores_desc == [5, 2]
+
+    # 2. Сортування за оцінкою asc
+    resp_asc = await api_client.get(f"/api/v1/targets/{target_id}/reviews", params={"sort": "score"})
+    assert resp_asc.status_code == 200
+    scores_asc = [r["score"] for r in resp_asc.json()["items"]]
+    assert scores_asc == [2, 5]
+
+    # 3. Фільтр за score=5
+    resp_filt = await api_client.get(f"/api/v1/targets/{target_id}/reviews", params={"score": 5})
+    assert resp_filt.status_code == 200
+    assert resp_filt.json()["total"] == 1
+    assert resp_filt.json()["items"][0]["score"] == 5
+
+    # 4. Невалідне поле сортування -> 422
+    resp_inv = await api_client.get(f"/api/v1/targets/{target_id}/reviews", params={"sort": "hack_column"})
+    assert resp_inv.status_code == 422
+
+
+async def test_update_review_endpoint(
+    api_client: AsyncClient,
+    superadmin_cookies: dict[str, str],
+    db_session: AsyncSession,
+    user_role: RoleModel,
+    auth_cookies_factory: Callable[[dict[str, Any] | None], dict[str, str]],
+) -> None:
+    # 1. Створення Target
+    target_resp = await api_client.post(
+        "/api/v1/targets",
+        json={"slug": f"target-rev-upd-{uuid7().hex[:8]}", "title": "Update Review Target", "category": "books"},
+        cookies=superadmin_cookies,
+    )
+    target_id = target_resp.json()["id"]
+
+    # 2. Автор створює відгук з оцінкою 3
+    author = await _create_user(db_session, user_role, prefix="author_upd")
+    author_cookies = auth_cookies_factory({"sub": str(author.id), "role": "user"})
+    rev_resp = await api_client.post(
+        f"/api/v1/targets/{target_id}/reviews",
+        json={"score": 3, "content": "Initial average review content for test."},
+        cookies=author_cookies,
+    )
+    assert rev_resp.status_code == 201
+    review_id = rev_resp.json()["id"]
+
+    # 3. Автор успішно оновлює відгук (200 OK)
+    update_payload = {
+        "score": 5,
+        "title": "Much better now!",
+        "content": "Updated content: masterpiece after second reading.",
+        "version": 1,
+    }
+    update_resp = await api_client.put(
+        f"/api/v1/targets/{target_id}/reviews/{review_id}",
+        json=update_payload,
+        cookies=author_cookies,
+    )
+    assert update_resp.status_code == 200
+    upd_data = update_resp.json()
+    assert upd_data["score"] == 5
+    assert upd_data["title"] == "Much better now!"
+    assert upd_data["version"] == 2
+
+    # Перевірка оновлення рейтингу таргету
+    rating_resp = await api_client.get(f"/api/v1/targets/{target_id}/rating")
+    assert rating_resp.status_code == 200
+    assert float(rating_resp.json()["average_score"]) == 5.0
+
+    # 4. OCC Conflict при передачі застарілої версії (409 Conflict)
+    conflict_resp = await api_client.put(
+        f"/api/v1/targets/{target_id}/reviews/{review_id}",
+        json={**update_payload, "version": 1},
+        cookies=author_cookies,
+    )
+    assert conflict_resp.status_code == 409
+    assert conflict_resp.json()["error_code"] == "OPTIMISTIC_LOCK_CONFLICT"
+
+    # 5. Спроба оновлення чужого відгуку іншим користувачем -> 403 Forbidden
+    stranger = await _create_user(db_session, user_role, prefix="stranger_upd")
+    stranger_cookies = auth_cookies_factory({"sub": str(stranger.id), "role": "user"})
+    forbidden_resp = await api_client.put(
+        f"/api/v1/targets/{target_id}/reviews/{review_id}",
+        json={**update_payload, "version": 2},
+        cookies=stranger_cookies,
+    )
+    assert forbidden_resp.status_code == 403
+
+
+async def test_delete_review_endpoint(
+    api_client: AsyncClient,
+    superadmin_cookies: dict[str, str],
+    db_session: AsyncSession,
+    user_role: RoleModel,
+    auth_cookies_factory: Callable[[dict[str, Any] | None], dict[str, str]],
+) -> None:
+    # 1. Створення Target
+    target_resp = await api_client.post(
+        "/api/v1/targets",
+        json={"slug": f"target-rev-del-{uuid7().hex[:8]}", "title": "Delete Review Target", "category": "games"},
+        cookies=superadmin_cookies,
+    )
+    target_id = target_resp.json()["id"]
+
+    # 2. Автор створює відгук
+    author = await _create_user(db_session, user_role, prefix="author_del")
+    author_cookies = auth_cookies_factory({"sub": str(author.id), "role": "user"})
+    rev_resp = await api_client.post(
+        f"/api/v1/targets/{target_id}/reviews",
+        json={"score": 4, "content": "Review that will be deleted by author."},
+        cookies=author_cookies,
+    )
+    assert rev_resp.status_code == 201
+    review_id = rev_resp.json()["id"]
+
+    # Рейтинг до видалення
+    r1 = await api_client.get(f"/api/v1/targets/{target_id}/rating")
+    assert r1.json()["total_reviews"] == 1
+
+    # 3. Чужий користувач без прав модератора намагається видалити -> 403 Forbidden
+    stranger = await _create_user(db_session, user_role, prefix="stranger_del")
+    stranger_cookies = auth_cookies_factory({"sub": str(stranger.id), "role": "user"})
+    f_res = await api_client.delete(
+        f"/api/v1/targets/{target_id}/reviews/{review_id}",
+        cookies=stranger_cookies,
+    )
+    assert f_res.status_code == 403
+
+    # 4. Автор успішно видаляє власний відгук (204 No Content)
+    del_res = await api_client.delete(
+        f"/api/v1/targets/{target_id}/reviews/{review_id}",
+        cookies=author_cookies,
+    )
+    assert del_res.status_code == 204
+
+    # Рейтинг після видалення зменшився до 0
+    r2 = await api_client.get(f"/api/v1/targets/{target_id}/rating")
+    assert r2.json()["total_reviews"] == 0
+
+    # 5. Завдяки частковому унікальному індексу, користувач може написати НОВИЙ відгук після видалення
+    new_rev_resp = await api_client.post(
+        f"/api/v1/targets/{target_id}/reviews",
+        json={"score": 5, "content": "Brand new review after deleting the old one!"},
+        cookies=author_cookies,
+    )
+    assert new_rev_resp.status_code == 201
+    new_review_id = new_rev_resp.json()["id"]
+
+    # 6. Адміністратор / Модератор може видалити будь-який відгук
+    admin_del = await api_client.delete(
+        f"/api/v1/targets/{target_id}/reviews/{new_review_id}",
+        cookies=superadmin_cookies,
+    )
+    assert admin_del.status_code == 204
+
+
+async def test_reviews_unhappy_paths_and_filters(
+    api_client: AsyncClient,
+    superadmin_cookies: dict[str, str],
+    db_session: AsyncSession,
+    user_role: RoleModel,
+    auth_cookies_factory: Callable[[dict[str, Any] | None], dict[str, str]],
+) -> None:
+    non_existent_target_id = uuid7()
+    non_existent_review_id = uuid7()
+
+    # 1. GET /targets/{target_id}/rating -> 404 for non-existent target
+    resp_rating_404 = await api_client.get(f"/api/v1/targets/{non_existent_target_id}/rating")
+    assert resp_rating_404.status_code == 404
+
+    # 2. GET /targets/{target_id}/reviews -> 404 for non-existent target
+    resp_reviews_404 = await api_client.get(f"/api/v1/targets/{non_existent_target_id}/reviews")
+    assert resp_reviews_404.status_code == 404
+
+    # Create target and review for further tests
+    target_resp = await api_client.post(
+        "/api/v1/targets",
+        json={"slug": f"target-unhappy-{uuid7().hex[:8]}", "title": "Unhappy Target", "category": "movie"},
+        cookies=superadmin_cookies,
+    )
+    target_id = target_resp.json()["id"]
+
+    author = await _create_user(db_session, user_role, prefix="author_unhappy")
+    author_cookies = auth_cookies_factory({"sub": str(author.id), "role": "user"})
+    rev_resp = await api_client.post(
+        f"/api/v1/targets/{target_id}/reviews",
+        json={"score": 4, "content": "Initial content for unhappy tests."},
+        cookies=author_cookies,
+    )
+    review_id = rev_resp.json()["id"]
+
+    # Test filtering by author_id and score on existing target
+    filter_author_resp = await api_client.get(
+        f"/api/v1/targets/{target_id}/reviews",
+        params={"author_id": str(author.id), "score": 4},
+    )
+    assert filter_author_resp.status_code == 200
+    assert filter_author_resp.json()["total"] == 1
+    assert filter_author_resp.json()["items"][0]["id"] == review_id
+
+    # 3. PUT /targets/{target_id}/reviews/{review_id}
+    # 3a. 401 Unauthorized
+    put_unauth = await api_client.put(
+        f"/api/v1/targets/{target_id}/reviews/{review_id}",
+        json={"score": 5, "content": "Updated content text.", "version": 1},
+    )
+    assert put_unauth.status_code == 401
+
+    # 3b. 404 Not Found
+    put_404 = await api_client.put(
+        f"/api/v1/targets/{target_id}/reviews/{non_existent_review_id}",
+        json={"score": 5, "content": "Updated content text.", "version": 1},
+        cookies=author_cookies,
+    )
+    assert put_404.status_code == 404
+
+    # 3c. 422 Unprocessable Entity (score=10 or short content)
+    put_422_score = await api_client.put(
+        f"/api/v1/targets/{target_id}/reviews/{review_id}",
+        json={"score": 10, "content": "Updated content text.", "version": 1},
+        cookies=author_cookies,
+    )
+    assert put_422_score.status_code == 422
+
+    put_422_content = await api_client.put(
+        f"/api/v1/targets/{target_id}/reviews/{review_id}",
+        json={"score": 5, "content": "Short", "version": 1},
+        cookies=author_cookies,
+    )
+    assert put_422_content.status_code == 422
+
+    # 4. DELETE /targets/{target_id}/reviews/{review_id}
+    # 4a. 401 Unauthorized
+    del_unauth = await api_client.delete(f"/api/v1/targets/{target_id}/reviews/{review_id}")
+    assert del_unauth.status_code == 401
+
+    # 4b. 404 Not Found
+    del_404 = await api_client.delete(
+        f"/api/v1/targets/{target_id}/reviews/{non_existent_review_id}",
+        cookies=superadmin_cookies,
+    )
+    assert del_404.status_code == 404
+
+    # 5. PATCH /reviews/{review_id}/moderate
+    # 5a. 401 Unauthorized
+    patch_unauth = await api_client.patch(
+        f"/api/v1/reviews/{review_id}/moderate",
+        json={"action": "hide"},
+    )
+    assert patch_unauth.status_code == 401
+
+    # 5b. 404 Not Found
+    patch_404 = await api_client.patch(
+        f"/api/v1/reviews/{non_existent_review_id}/moderate",
+        json={"action": "hide"},
+        cookies=superadmin_cookies,
+    )
+    assert patch_404.status_code == 404
+
+    # 5c. 409 Conflict (invalid version)
+    patch_409 = await api_client.patch(
+        f"/api/v1/reviews/{review_id}/moderate",
+        json={"action": "hide", "version": 999},
+        cookies=superadmin_cookies,
+    )
+    assert patch_409.status_code == 409
+    assert patch_409.json()["error_code"] == "OPTIMISTIC_LOCK_CONFLICT"
+
+    # 6. POST /reviews/{review_id}/vote -> 422 on empty body
+    vote_422 = await api_client.post(
+        f"/api/v1/reviews/{review_id}/vote",
+        json={},
+        cookies=author_cookies,
+    )
+    assert vote_422.status_code == 422
+
+
+async def test_vote_switching_and_moderation_rating_sync_via_api(
+    api_client: AsyncClient,
+    superadmin_cookies: dict[str, str],
+    no_permissions_cookies: dict[str, str],
+    db_session: AsyncSession,
+    user_role: RoleModel,
+    auth_cookies_factory: Callable[[dict[str, Any] | None], dict[str, str]],
+) -> None:
+    # 1. Створення Target та Review
+    target_resp = await api_client.post(
+        "/api/v1/targets",
+        json={"slug": f"target-sync-{uuid7().hex[:8]}", "title": "Sync Target", "category": "movie"},
+        cookies=superadmin_cookies,
+    )
+    target_id = target_resp.json()["id"]
+
+    author = await _create_user(db_session, user_role, prefix="author_sync")
+    author_cookies = auth_cookies_factory({"sub": str(author.id), "role": "user"})
+    rev_resp = await api_client.post(
+        f"/api/v1/targets/{target_id}/reviews",
+        json={"score": 5, "content": "Detailed review for testing vote switching and moderation."},
+        cookies=author_cookies,
+    )
+    assert rev_resp.status_code == 201
+    review_id = rev_resp.json()["id"]
+
+    # 2. Voter голосує helpful=True, а потім змінює на helpful=False
+    voter = await _create_user(db_session, user_role, prefix="voter_sync")
+    voter_cookies = auth_cookies_factory({"sub": str(voter.id), "role": "user"})
+
+    v1 = await api_client.post(
+        f"/api/v1/reviews/{review_id}/vote",
+        json={"is_helpful": True},
+        cookies=voter_cookies,
+    )
+    assert v1.status_code == 200
+
+    v2 = await api_client.post(
+        f"/api/v1/reviews/{review_id}/vote",
+        json={"is_helpful": False},
+        cookies=voter_cookies,
+    )
+    assert v2.status_code == 200
+    assert v2.json()["is_helpful"] is False
+
+    # Перевіряємо лічильники у видачі відгуків та сортування за helpful_count
+    list_resp = await api_client.get(
+        f"/api/v1/targets/{target_id}/reviews",
+        params={"sort": "-helpful_count"},
+    )
+    assert list_resp.status_code == 200
+    item = list_resp.json()["items"][0]
+    assert item["helpful_count"] == 0
+    assert item["unhelpful_count"] == 1
+
+    # 3. Перевірка RBAC 403 без дозволів для PUT та DELETE
+    put_no_perm = await api_client.put(
+        f"/api/v1/targets/{target_id}/reviews/{review_id}",
+        json={"score": 4, "content": "Updated content without permission.", "version": 1},
+        cookies=no_permissions_cookies,
+    )
+    assert put_no_perm.status_code == 403
+
+    del_no_perm = await api_client.delete(
+        f"/api/v1/targets/{target_id}/reviews/{review_id}",
+        cookies=no_permissions_cookies,
+    )
+    assert del_no_perm.status_code == 403
+
+    # 4. Модерація: hide -> перевірка фільтра status=hidden та синхронного зменшення рейтингу
+    hide_resp = await api_client.patch(
+        f"/api/v1/reviews/{review_id}/moderate",
+        json={"action": "hide"},
+        cookies=superadmin_cookies,
+    )
+    assert hide_resp.status_code == 200
+    assert hide_resp.json()["status"] == "hidden"
+
+    rating_after_hide = await api_client.get(f"/api/v1/targets/{target_id}/rating")
+    assert rating_after_hide.status_code == 200
+    assert rating_after_hide.json()["total_reviews"] == 0
+
+    hidden_list = await api_client.get(
+        f"/api/v1/targets/{target_id}/reviews",
+        params={"status": "hidden"},
+    )
+    assert hidden_list.status_code == 200
+    assert hidden_list.json()["total"] == 1

@@ -44,6 +44,60 @@ class LoginDTO(BaseModel):
         return v.strip().lower()
 
 
+class RegisterDTO(BaseModel):
+    """DTO публічної реєстрації користувача."""
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    username: Annotated[
+        str,
+        Field(
+            min_length=3,
+            max_length=50,
+            pattern=r"^[a-zA-Z0-9][a-zA-Z0-9_.-]*[a-zA-Z0-9]$",
+            description="Логін користувача (латиниця, цифри, дефіс, крапка, підкреслення)",
+            examples=["ivan.ivanov"],
+        ),
+    ]
+    name: Annotated[
+        str,
+        Field(
+            min_length=2,
+            max_length=255,
+            description="ПІБ або ім'я користувача",
+            examples=["Іван Іванов"],
+        ),
+    ]
+    password: Annotated[
+        str,
+        Field(
+            min_length=8,
+            max_length=128,
+            description="Пароль користувача",
+            examples=["StrongP@ssw0rd!"],
+        ),
+    ]
+    is_remember_me: Annotated[
+        bool,
+        Field(
+            default=False,
+            description="Прапорець довготривалої сесії (до 7-30 днів замість сесійного cookie)",
+        ),
+    ] = False
+
+    @field_validator("username")
+    @classmethod
+    def normalize_username(cls, v: str) -> str:
+        return v.strip().lower()
+
+    @field_validator("name")
+    @classmethod
+    def normalize_name(cls, v: str) -> str:
+        from src.utils import normalize_human_name
+
+        return normalize_human_name(v)
+
+
 class RefreshTokenDTO(BaseModel):
     """DTO запиту на оновлення токенів за активним refresh_token."""
 

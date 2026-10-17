@@ -21,6 +21,10 @@ from src.infrastructure.db import (
     UUIDPrimaryKeyMixin,
     VersionedMixin,
 )
+from src.infrastructure.redis import (
+    RedisSetBuffer,
+    get_set_buffer,
+)
 
 __all__ = [
     "Base",
@@ -28,6 +32,7 @@ __all__ = [
     "CreatedAtMixin",
     "CreatedByMixin",
     "IdentifiableModelProtocol",
+    "RedisSetBuffer",
     "SafeJsonCoder",
     "SafeRedisBackend",
     "SoftDeleteMixin",
@@ -41,5 +46,6 @@ __all__ = [
     "clear_cache_with_dependencies",
     "delete_by_pattern",
     "get_cache_dependency_graph",
+    "get_set_buffer",
     "setup_cache",
 ]

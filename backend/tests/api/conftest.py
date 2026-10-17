@@ -7,7 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from uuid6 import uuid7
 
-from src.api import get_uow
+from src.api import get_read_db_session, get_uow
 from src.core import (
     IUnitOfWork,
     SystemRole,
@@ -53,7 +53,7 @@ async def api_client(db_session: AsyncSession) -> AsyncGenerator[AsyncClient, No
     """
     HTTP клієнт для API/E2E тестів з автоматичним скиданням
     усіх dependency_overrides після завершення тесту.
-    Автоматично підміняє get_db_session на транзакційну сесію із savepoint,
+    Автоматично підміняє get_db_session та get_read_db_session на транзакційну сесію із savepoint,
     що гарантує повний відкат усіх створених даних після тесту.
     """
 
@@ -61,6 +61,7 @@ async def api_client(db_session: AsyncSession) -> AsyncGenerator[AsyncClient, No
         yield db_session
 
     app.dependency_overrides[get_db_session] = _override_get_db_session
+    app.dependency_overrides[get_read_db_session] = _override_get_db_session
     transport = ASGITransport(app=app)
     async with ApiTestClient(transport=transport, base_url="http://testserver") as client:
         yield client
@@ -117,9 +118,25 @@ def superadmin_cookies(
 
 
 @pytest.fixture
-async def viewer_role(db_session: AsyncSession) -> RoleModel:
-    """Отримання базової системної ролі глядача (viewer)."""
-    stmt = select(RoleModel).where(RoleModel.code == SystemRole.VIEWER.value)
+async def user_role(db_session: AsyncSession) -> RoleModel:
+    """Отримання базової системної ролі користувача (user)."""
+    stmt = select(RoleModel).where(RoleModel.code == SystemRole.USER.value)
+    res = await db_session.execute(stmt)
+    role = res.scalar_one()
+    db_session.expunge(role)
+    return role
+
+
+@pytest.fixture
+def viewer_role(user_role: RoleModel) -> RoleModel:
+    """Аліас для зворотної сумісності з тестами (viewer_role -> user_role)."""
+    return user_role
+
+
+@pytest.fixture
+async def admin_role(db_session: AsyncSession) -> RoleModel:
+    """Отримання системної ролі адміністратора (admin)."""
+    stmt = select(RoleModel).where(RoleModel.code == SystemRole.ADMIN.value)
     res = await db_session.execute(stmt)
     role = res.scalar_one()
     db_session.expunge(role)
@@ -147,7 +164,7 @@ async def no_permissions_user(db_session: AsyncSession) -> UserModel:
         role_id=role.id,
     )
     db_session.add(user)
-    await db_session.flush()
+    await db_session.commit()
     db_session.expunge(user)
     db_session.expunge(role)
     return user
@@ -185,7 +202,7 @@ async def admin_user_with_permissions(
 
     for p in all_perms:
         db_session.add(UserPermissionModel(user_id=user.id, permission_id=p.id))
-    await db_session.flush()
+    await db_session.commit()
     db_session.expunge(user)
     return user
 
@@ -196,5 +213,4 @@ def admin_cookies(
     admin_user_with_permissions: UserModel,
 ) -> dict[str, str]:
     """Cookies авторизованого користувача з усіма правами (не super_admin)."""
-    return auth_cookies_factory({"sub": str(admin_user_with_permissions.id), "role": "viewer"})
-
+    return auth_cookies_factory({"sub": str(admin_user_with_permissions.id), "role": "admin"})
