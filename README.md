@@ -98,36 +98,55 @@ flowchart TD
     end
 
     subgraph Edge["Маршрутизація"]
-        Nginx["Nginx Reverse Proxy\n(:80 / :443)"]
+        Nginx["Nginx Reverse Proxy & Load Balancer\n(:80 / Round-Robin & Failover)"]
     end
 
-    subgraph App["Сервісний шар"]
-        Backend["FastAPI Backend\n(:8000, Stateless)"]
+    subgraph App["Сервісний шар (Stateless Cluster)"]
+        Backend1["FastAPI Backend 1\n(:8000, X-Instance-ID: backend-1)"]
+        Backend2["FastAPI Backend 2\n(:8000, X-Instance-ID: backend-2)"]
         Worker["ARQ Background Worker\n(Cron-задачі перерахунку та очищення)"]
     end
 
-    subgraph Storage["Зберігання даних"]
-        Redis[("Redis 7\n(DB 0: Кеш та Set-буфер,\nDB 1: Черга ARQ)")]
+    subgraph Storage["Зберігання даних (Centralized State)"]
+        Redis[("Redis 7\n(DB 0: Кеш, Set-буфер та Rate Limits,\nDB 1: Черга ARQ)")]
         PostgresPrimary[("PostgreSQL 16 Primary\n(Write-сесії: транзакції, OCC)")]
         PostgresReplica[("PostgreSQL 16 Read Replica\n(Read-сесії: QueryService)")]
         Backup["Контейнер бекапів\n(pg_dump за розкладом cron)"]
     end
 
     Client -->|"HTTP / JSON / Cookies"| Nginx
-    Nginx -->|"HTTP Proxy"| Backend
+    Nginx -->|"HTTP Proxy (Round-Robin)"| Backend1
+    Nginx -->|"HTTP Proxy (Round-Robin)"| Backend2
 
-    Backend <-->|"Cache-Aside / Circuit Breaker"| Redis
-    Backend -->|"SADD dirty_targets"| Redis
+    Backend1 <-->|"Cache-Aside / Circuit Breaker"| Redis
+    Backend2 <-->|"Cache-Aside / Circuit Breaker"| Redis
+    Backend1 -->|"SADD dirty_targets"| Redis
+    Backend2 -->|"SADD dirty_targets"| Redis
 
     Worker <-->|"SPOP dirty_targets / Cron"| Redis
     Worker -->|"Batch Recalculate Bayesian Score"| PostgresPrimary
 
-    Backend -->|"Write (Use Cases)"| PostgresPrimary
-    Backend -.->|"Read (Query Services)"| PostgresReplica
+    Backend1 -->|"Write (Use Cases)"| PostgresPrimary
+    Backend2 -->|"Write (Use Cases)"| PostgresPrimary
+    Backend1 -.->|"Read (Query Services)"| PostgresReplica
+    Backend2 -.->|"Read (Query Services)"| PostgresReplica
 
     PostgresPrimary -.->|"Реплікація"| PostgresReplica
     PostgresPrimary -->|"Щоденний бекап о 02:00"| Backup
 ```
+
+### Stateless-архітектура та аудит стану
+
+У рамках Лабораторної роботи №2 сервісний шар платформи оптимізовано для безшовного горизонтального масштабування. Усі екземпляри бекенду (`backend-1`, `backend-2`) є повністю взаємозамінними, а будь-який локальний стан усунуто або винесено у спільні сховища.
+
+| Категорія стану | Компоненти системи | Спосіб ізоляції та винесення стану |
+| :--- | :--- | :--- |
+| **Ephemeral / Local Safe** | DTO запитів, `correlation_id_ctx`, `current_user_id_ctx`, `cache_fallback_ctx`, розрахунок `X-Process-Time-Ms` | Ізольовано в межах поточної корутини через `ContextVar` та локальні змінні стеку; очищується збирачем сміття (GC) після виходу з DI-скоупу FastAPI. |
+| **Shared / Externalized** | Бізнес-сутності та OCC-версії, `refresh_tokens`, Cache-Aside, буфер брудних рейтингів (`dirty_targets`), черга ARQ, ліміти SlowAPI | Централізовано у **PostgreSQL 16 Primary** (транзакції ACID, OCC `version`) та **Redis 7** (DB 0 — кеш, множини `SADD`/`SPOP`, rate limiting; DB 1 — черга фонових задач). |
+| **Critical Stateful Dependencies (Усунено)** | In-memory сесії, глобальні `dict`/`list` кеші, локальні блокування `asyncio.Lock`, Sticky Sessions | Повністю усунено. Автентифікація базується на stateless `HttpOnly` JWT. Балансування через Nginx працює за чистим Round-Robin без сесійної прив'язки. |
+
+> [!NOTE]
+> Детальну специфікацію наскрізного потоку виконання запиту (*Stateless Request Flow*), аналіз Keep-Alive race conditions та конфігурацію спільної зони пам'яті Nginx див. у [**`docs/stateless-architecture.md`**](./docs/stateless-architecture.md).
 
 ### Піковий сценарій навантаження (High-Load Scenario)
 
@@ -168,10 +187,10 @@ flowchart TD
 | Реалізація модуля `reviews` (доменні моделі, Use Cases, Query Services, OCC) | **A / R** | **I** |
 | Міграції Alembic, індекси та обмеження цілісності PostgreSQL | **A / R** | **R** |
 | Кешування Redis (Cache-Aside, Circuit Breaker) та фоновий воркер ARQ | **A / R** | **C** |
-| Контейнеризація застосунку (`Dockerfile`, `docker-compose.yaml`, `networks`, `volumes`) | **C** | **A / R** |
+| Контейнеризація застосунку (`Dockerfile`, `docker-compose.yaml`, масштабування інстансів `backend_1` та `backend_2`) | **C** | **A / R** |
 | Оркестрація автоміграцій (`rating_migrator`) та сідування SuperAdmin | **C** | **A / R** |
 | Автоматизація резервного копіювання БД (`rating_db_backup`, `pg_backup_rotated.sh`) | **I** | **A / R** |
-| Налаштування Nginx, healthchecks та лімітів ресурсів контейнерів | **I** | **A / R** |
+| Налаштування Nginx (Round-Robin, Failover), healthchecks, лімітів ресурсів та тестування відмовостійкості | **I** | **A / R** |
 | Написання Unit, API та Integration тестів (Pytest) | **A / R** | **I** |
 
 ---
@@ -200,15 +219,45 @@ flowchart TD
    * `rating_postgres` — PostgreSQL 16 (прокинутий на хост-порт `5434`, дані зберігаються у volume `postgres_data`);
    * `rating_redis` — Redis 7 (порт `6379`, volume `redis_data`);
    * `rating_migrator` — одноразовий контейнер, який виконує `alembic upgrade head` та створює обліковий запис `super_admin`;
-   * `rating_backend` — FastAPI сервер (порт `8000`);
-   * `rating_nginx` — реверс-проксі та балансувальник навантаження Nginx (порт `80`);
+   * `rating_backend_1` — перший stateless-інстанс FastAPI (порт `127.0.0.1:8001`, `X-Instance-ID: backend-1`);
+   * `rating_backend_2` — другий stateless-інстанс FastAPI (порт `127.0.0.1:8002`, `X-Instance-ID: backend-2`);
+   * `rating_nginx` — реверс-проксі та балансувальник навантаження Nginx (порт `80`, спільна пам'ять Round-Robin та Failover);
    * `rating_worker` — фоновий воркер ARQ;
    * `rating_db_backup` — cron-контейнер щоденного бекапу БД у папку `./backups`.
 
-3. Перевірка роботи після запуску (через Nginx на порту `80` або напряму на `8000`):
-   * Swagger UI: `http://127.0.0.1/docs` (або `http://127.0.0.1:8000/docs`)
-   * Healthcheck API: `http://127.0.0.1/api/v1/health`
+3. Перевірка роботи після запуску:
+   * Swagger UI (балансується між інстансами): `http://127.0.0.1/docs` (або прямий доступ до окремих вузлів: `http://127.0.0.1:8001/docs` та `http://127.0.0.1:8002/docs`)
+   * Healthcheck API: `http://127.0.0.1/api/v1/health` (Round-Robin із поверненням заголовка `X-Instance-ID`)
    * Healthcheck Nginx: `http://127.0.0.1/nginx-health`
+
+### Перевірка Cross-Instance консистентності та відмовостійкості (Resilience Testing)
+
+Для автоматизованої перевірки відсутності сесійної прив'язки (Sticky Sessions), перевірки почергового чергування вузлів та симуляції аварійного збою використовуйте верифікаційний скрипт:
+
+```bash
+bash scripts/resilience/verify_stateless.sh
+```
+
+Скрипт послідовно виконує 3 сценарії:
+1. **Round-Robin & Node Identification:** серія запитів до `/api/v1/health` із перевіркою чергування заголовка `X-Instance-ID` (`backend-1` ⇄ `backend-2`);
+2. **Cross-Instance Consistency:** створення та оновлення об'єкта на одному вузлі з миттєвим читанням актуального стану (та інвалідацією кешу) на іншому вузлі без Sticky Sessions;
+3. **Instance Loss / Crash Failover:** аварійна зупинка вузла (`docker stop rating_backend_1`) під навантаженням та підтвердження, що Nginx прозоро перенаправляє трафік на `backend_2` без жодної помилки `502`.
+
+**Приклади швидкої ручної перевірки через cURL:**
+
+```bash
+# 1. Перевірка чергування вузлів кластера (Round-Robin):
+for i in {1..4}; do curl -s -I http://127.0.0.1/api/v1/health | grep -E "HTTP/|X-Instance-ID"; done
+
+# 2. Симуляція збою вузла backend-1:
+docker stop rating_backend_1
+
+# 3. Перевірка підхоплення трафіку вузлом backend-2 (без 502 Bad Gateway):
+curl -s -I http://127.0.0.1/api/v1/health | grep -E "HTTP/|X-Instance-ID"
+
+# 4. Повернення першого вузла в стрій:
+docker start rating_backend_1
+```
 
 ---
 

@@ -1,3 +1,35 @@
+x-backend-common: &backend-common
+  build:
+    context: ./backend
+    dockerfile: Dockerfile
+  restart: unless-stopped
+  env_file:
+    - .env
+  volumes:
+    - ./backend:/app:z
+    - /app/.venv
+    - ./logs:/logs:z
+    - ./storage:/storage:z
+  depends_on:
+    postgres:
+      condition: service_healthy
+    migrator:
+      condition: service_completed_successfully
+    redis:
+      condition: service_healthy
+  deploy:
+    resources:
+      limits:
+        memory: 512M
+  healthcheck:
+    test: ["CMD", "curl", "-f", "http://127.0.0.1:8000/api/v1/health"]
+    interval: 10s
+    timeout: 5s
+    retries: 5
+    start_period: 10s
+  networks:
+    - rating_network
+
 services:
 
   postgres:
@@ -98,45 +130,29 @@ services:
     networks:
       - rating_network
 
-  backend:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
-    container_name: rating_backend
-    restart: unless-stopped
-    env_file:
-      - .env
+  backend_1:
+    <<: *backend-common
+    container_name: rating_backend_1
     environment:
       APP_CONFIG__DB__HOST: postgres
       APP_CONFIG__REDIS__HOST: redis
       APP_CONFIG__LOG__DIR: /logs
       APP_CONFIG__STORAGE__DIR: /storage
-    volumes:
-      - ./backend:/app:z
-      - /app/.venv
-      - ./logs:/logs:z
-      - ./storage:/storage:z
+      APP_CONFIG__INSTANCE_ID: backend-1
     ports:
-      - "127.0.0.1:8000:8000"
-    depends_on:
-      postgres:
-        condition: service_healthy
-      migrator:
-        condition: service_completed_successfully
-      redis:
-        condition: service_healthy
-    deploy:
-      resources:
-        limits:
-          memory: 512M
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://127.0.0.1:8000/api/v1/health"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 10s
-    networks:
-      - rating_network
+      - "127.0.0.1:8001:8000"
+
+  backend_2:
+    <<: *backend-common
+    container_name: rating_backend_2
+    environment:
+      APP_CONFIG__DB__HOST: postgres
+      APP_CONFIG__REDIS__HOST: redis
+      APP_CONFIG__LOG__DIR: /logs
+      APP_CONFIG__STORAGE__DIR: /storage
+      APP_CONFIG__INSTANCE_ID: backend-2
+    ports:
+      - "127.0.0.1:8002:8000"
 
   worker:
     build:
@@ -181,7 +197,9 @@ services:
       - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro,z
       - ./logs/nginx:/var/log/nginx:z
     depends_on:
-      backend:
+      backend_1:
+        condition: service_healthy
+      backend_2:
         condition: service_healthy
     deploy:
       resources:
