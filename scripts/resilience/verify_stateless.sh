@@ -31,6 +31,7 @@ SUPERADMIN_USER="${SUPERADMIN_USER:-super_admin}"
 SUPERADMIN_PASSWORD="${SUPERADMIN_PASSWORD:-super_admin}"
 BACKEND_1_CONTAINER="${BACKEND_1_CONTAINER:-rating_backend_1}"
 BACKEND_2_CONTAINER="${BACKEND_2_CONTAINER:-rating_backend_2}"
+BACKEND_3_CONTAINER="${BACKEND_3_CONTAINER:-rating_backend_3}"
 MAX_HEALTH_WAIT="${MAX_HEALTH_WAIT:-30}"
 
 # --- Тимчасові файли для збереження сесій та заголовків ---
@@ -55,7 +56,7 @@ print_banner() {
     echo -e "${DIM}   Лабораторна робота №2: Архітектура без збереження стану (Stateless)${NC}"
     echo -e "${BOLD}${CYAN}================================================================================${NC}"
     echo -e "${DIM}Базовий URL Nginx : ${BASE_URL}${NC}"
-    echo -e "${DIM}Вузли кластера    : ${BACKEND_1_CONTAINER} (backend-1), ${BACKEND_2_CONTAINER} (backend-2)${NC}"
+    echo -e "${DIM}Вузли кластера    : ${BACKEND_1_CONTAINER} (backend-1), ${BACKEND_2_CONTAINER} (backend-2), ${BACKEND_3_CONTAINER} (backend-3)${NC}"
     echo -e "${DIM}Користувач тесту  : ${SUPERADMIN_USER}${NC}"
     echo -e "${BOLD}${CYAN}--------------------------------------------------------------------------------${NC}"
 }
@@ -209,6 +210,7 @@ run_scenario_1() {
 
     local count_b1=0
     local count_b2=0
+    local count_b3=0
     local total_reqs=6
 
     for ((i=1; i<=total_reqs; i++)); do
@@ -222,6 +224,8 @@ run_scenario_1() {
             count_b1=$((count_b1 + 1))
         elif [[ "${LAST_INSTANCE_ID}" == "backend-2" ]]; then
             count_b2=$((count_b2 + 1))
+        elif [[ "${LAST_INSTANCE_ID}" == "backend-3" ]]; then
+            count_b3=$((count_b3 + 1))
         else
             log_warn "Отримано невідомий або порожній X-Instance-ID: '${LAST_INSTANCE_ID}'"
         fi
@@ -231,13 +235,14 @@ run_scenario_1() {
     log_info "Статистика розподілу запитів:"
     echo -e "       • backend-1: ${BOLD}${count_b1}${NC} запитів"
     echo -e "       • backend-2: ${BOLD}${count_b2}${NC} запитів"
+    echo -e "       • backend-3: ${BOLD}${count_b3}${NC} запитів"
 
-    if [[ ${count_b1} -eq 0 || ${count_b2} -eq 0 ]]; then
+    if [[ ${count_b1} -eq 0 || ${count_b2} -eq 0 || ${count_b3} -eq 0 ]]; then
         log_error "Round-Robin балансування не підтверджено: один з інстансів не отримав жодного запиту!"
         return 1
     fi
 
-    log_success "Round-Robin розподіл підтверджено: обидва інстанси обробляють запити почергово."
+    log_success "Round-Robin розподіл підтверджено: інстанси обробляють запити почергово."
 }
 
 # ==============================================================================
@@ -401,21 +406,29 @@ run_scenario_3() {
     log_warn "Зупиняємо контейнер '${BACKEND_1_CONTAINER}'..."
     docker stop "${BACKEND_1_CONTAINER}" >/dev/null
     CONTAINER_STOPPED=true
-    log_info "Контейнер '${BACKEND_1_CONTAINER}' успішно зупинено. Кластер перебуває у деградованому стані (1 вузол)."
+    log_info "Контейнер '${BACKEND_1_CONTAINER}' успішно зупинено. Кластер перебуває у деградованому стані (2 з 3 вузлів активні)."
 
     # --- Крок 3.2: Виконання запитів через Nginx без простою ---
     log_step "Крок 3.2: Виконання 4 операцій (читання, запис, healthcheck) через Nginx"
-    log_info "Nginx повинен миттєво перенаправляти запити на живий вузол без помилок 502/503/504."
+    log_info "Nginx повинен миттєво перенаправляти запити на живі вузли (backend-2 / backend-3) без помилок 502/503/504."
 
     # 1. Healthcheck
     http_request "GET" "${API_PREFIX}/health"
     assert_eq "200" "${LAST_STATUS}" "Failover запит 1/4: GET /health"
-    assert_eq "backend-2" "${LAST_INSTANCE_ID}" "Запит 1/4 оброблено живим вузлом backend-2"
+    if [[ "${LAST_INSTANCE_ID}" != "backend-2" && "${LAST_INSTANCE_ID}" != "backend-3" ]]; then
+        log_error "Запит 1/4: очікувався живий вузол (backend-2 або backend-3), отримано '${LAST_INSTANCE_ID}'"
+        return 1
+    fi
+    log_success "Запит 1/4 оброблено живим вузлом (${LAST_INSTANCE_ID})"
 
     # 2. Читання Target
     http_request "GET" "${API_PREFIX}/targets/${TARGET_ID}" "" true false
     assert_eq "200" "${LAST_STATUS}" "Failover запит 2/4: GET /targets/{id}"
-    assert_eq "backend-2" "${LAST_INSTANCE_ID}" "Запит 2/4 оброблено живим вузлом backend-2"
+    if [[ "${LAST_INSTANCE_ID}" != "backend-2" && "${LAST_INSTANCE_ID}" != "backend-3" ]]; then
+        log_error "Запит 2/4: очікувався живий вузол (backend-2 або backend-3), отримано '${LAST_INSTANCE_ID}'"
+        return 1
+    fi
+    log_success "Запит 2/4 оброблено живим вузлом (${LAST_INSTANCE_ID})"
 
     # 3. Неідемпотентний запис (PUT з оновленням OCC до version: 3)
     local failover_title="Target Surviving Failover $(date +%s)"
@@ -435,7 +448,11 @@ run_scenario_3() {
 
     http_request "PUT" "${API_PREFIX}/targets/${TARGET_ID}" "${failover_update_payload}" true false
     assert_eq "200" "${LAST_STATUS}" "Failover запит 3/4: PUT /targets/{id} (Non-idempotent write)"
-    assert_eq "backend-2" "${LAST_INSTANCE_ID}" "Запит 3/4 оброблено живим вузлом backend-2"
+    if [[ "${LAST_INSTANCE_ID}" != "backend-2" && "${LAST_INSTANCE_ID}" != "backend-3" ]]; then
+        log_error "Запит 3/4: очікувався живий вузол (backend-2 або backend-3), отримано '${LAST_INSTANCE_ID}'"
+        return 1
+    fi
+    log_success "Запит 3/4 оброблено живим вузлом (${LAST_INSTANCE_ID})"
     local failover_version
     failover_version=$(jq -r '.version // empty' <<< "${LAST_BODY}")
     assert_eq "3" "${failover_version}" "Інкремент OCC-версії під час відмови (версія: 3)"
@@ -443,7 +460,11 @@ run_scenario_3() {
     # 4. Читання оновленого Target
     http_request "GET" "${API_PREFIX}/targets/${TARGET_ID}" "" true false
     assert_eq "200" "${LAST_STATUS}" "Failover запит 4/4: GET /targets/{id} після запису"
-    assert_eq "backend-2" "${LAST_INSTANCE_ID}" "Запит 4/4 оброблено живим вузлом backend-2"
+    if [[ "${LAST_INSTANCE_ID}" != "backend-2" && "${LAST_INSTANCE_ID}" != "backend-3" ]]; then
+        log_error "Запит 4/4: очікувався живий вузол (backend-2 або backend-3), отримано '${LAST_INSTANCE_ID}'"
+        return 1
+    fi
+    log_success "Запит 4/4 оброблено живим вузлом (${LAST_INSTANCE_ID})"
 
     log_success "Жоден запит не зазнав збою! Відсутність 502 Bad Gateway / 504 Gateway Timeout підтверджена."
 
@@ -478,6 +499,7 @@ run_scenario_3() {
     log_info "Перевірка автоматичного повернення вузла в ротацію Nginx (6 запитів)..."
     local recovered_b1=0
     local recovered_b2=0
+    local recovered_b3=0
 
     for ((i=1; i<=6; i++)); do
         http_request "GET" "${API_PREFIX}/health"
@@ -490,6 +512,8 @@ run_scenario_3() {
             recovered_b1=$((recovered_b1 + 1))
         elif [[ "${LAST_INSTANCE_ID}" == "backend-2" ]]; then
             recovered_b2=$((recovered_b2 + 1))
+        elif [[ "${LAST_INSTANCE_ID}" == "backend-3" ]]; then
+            recovered_b3=$((recovered_b3 + 1))
         fi
     done
 
@@ -497,9 +521,10 @@ run_scenario_3() {
     log_info "Статистика ротації після відновлення:"
     echo -e "       • backend-1: ${BOLD}${recovered_b1}${NC} запитів"
     echo -e "       • backend-2: ${BOLD}${recovered_b2}${NC} запитів"
+    echo -e "       • backend-3: ${BOLD}${recovered_b3}${NC} запитів"
 
-    if [[ ${recovered_b1} -eq 0 || ${recovered_b2} -eq 0 ]]; then
-        log_error "Відновлений вузол '${BACKEND_1_CONTAINER}' не повернувся в активну ротацію Nginx (backend-1: ${recovered_b1}, backend-2: ${recovered_b2})!"
+    if [[ ${recovered_b1} -eq 0 || (${recovered_b2} -eq 0 && ${recovered_b3} -eq 0) ]]; then
+        log_error "Відновлений вузол '${BACKEND_1_CONTAINER}' не повернувся в активну ротацію Nginx (backend-1: ${recovered_b1}, backend-2: ${recovered_b2}, backend-3: ${recovered_b3})!"
         return 1
     fi
     log_success "Вузол '${BACKEND_1_CONTAINER}' автоматично повернувся в ротацію Nginx без перезапуску проксі!"
