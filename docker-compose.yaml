@@ -117,7 +117,7 @@ services:
       - ./logs:/logs:z
       - ./storage:/storage:z
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     depends_on:
       postgres:
         condition: service_healthy
@@ -168,6 +168,31 @@ services:
       resources:
         limits:
           memory: 384M
+    networks:
+      - rating_network
+
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: rating_nginx
+    restart: unless-stopped
+    ports:
+      - "${HTTP_PORT:-80}:80"
+    volumes:
+      - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro,z
+      - ./logs/nginx:/var/log/nginx:z
+    depends_on:
+      backend:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          cpus: '0.50'
+          memory: 128M
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1/nginx-health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
     networks:
       - rating_network
 
