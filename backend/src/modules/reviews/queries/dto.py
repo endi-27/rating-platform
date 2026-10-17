@@ -5,6 +5,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict
 
+from src.modules.reviews.domain.enums import ReviewStatus
+
 
 class TargetRatingResponseDTO(BaseModel):
     """Схема агрегованого рейтингу об'єкта."""
@@ -51,7 +53,7 @@ class ReviewResponseDTO(BaseModel):
     score: int
     title: str | None
     content: str
-    status: str
+    status: ReviewStatus
     helpful_count: int
     unhelpful_count: int
     version: int

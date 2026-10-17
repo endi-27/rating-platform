@@ -32,6 +32,7 @@ from src.modules.reviews.dependencies import (
     get_update_review_uc,
     get_vote_review_uc,
 )
+from src.modules.reviews.domain.enums import ReviewStatus
 from src.modules.reviews.domain.exceptions import (
     ReviewNotFoundException,
     TargetNotFoundException,
@@ -87,7 +88,10 @@ async def list_target_reviews(
     review_queries: Annotated[ReviewQueryService, Depends(get_review_query_service)],
     target_queries: Annotated[TargetQueryService, Depends(get_target_query_service)],
     score: Annotated[int | None, Query(ge=1, le=5, description="Фільтр за оцінкою")] = None,
-    status_filter: Annotated[str, Query(alias="status", description="Статус модерації")] = "published",
+    status_filter: Annotated[
+        ReviewStatus,
+        Query(alias="status", description="Статус модерації"),
+    ] = ReviewStatus.PUBLISHED,
     author_id: Annotated[UUID | None, Query(description="Фільтр за автором відгуку")] = None,
 ) -> PaginatedResponse[ReviewResponseDTO]:
     # 1. Перевірка існування об'єкта
@@ -116,7 +120,7 @@ async def list_target_reviews(
     summary="Агрегований знімок рейтингу об'єкта",
     description="Миттєва видача лічильників, середнього та байєсівського рейтингу з кешу Redis.",
 )
-@cache(expire=3600, namespace=settings.cache.namespace.reviews)
+@cache(expire=settings.cache.reviews_expire, namespace=settings.cache.namespace.reviews)
 async def get_target_rating(
     target_id: UUID,
     target_queries: Annotated[TargetQueryService, Depends(get_target_query_service)],

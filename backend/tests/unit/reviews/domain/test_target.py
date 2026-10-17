@@ -161,3 +161,22 @@ def test_target_update_details_title_max_length_and_whitespace_description() -> 
 
     target.update_details(description="   ")
     assert target.description is None
+
+
+def test_target_update_details_category_max_length_and_partial_updates() -> None:
+    target = Target.create(
+        slug="blade-runner-2049",
+        title="Blade Runner 2049",
+        category="movie",
+        description="   ",
+    )
+    assert target.description is None
+
+    with pytest.raises(DomainException, match="Категорія повинна"):
+        target.update_details(category="c" * 101)
+
+    # Partial update with None values preserves existing fields
+    target.update_details(metadata={"Oscar": True})
+    assert target.title == "Blade Runner 2049"
+    assert target.category == "movie"
+    assert target.metadata == {"Oscar": True}

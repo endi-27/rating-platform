@@ -6,6 +6,7 @@ from uuid6 import uuid7
 
 from src.core import (
     AccountDeactivatedException,
+    DomainException,
     ForbiddenException,
     OptimisticLockConflictException,
 )
@@ -1226,3 +1227,102 @@ async def test_vote_review_change_from_unhelpful_to_helpful(
     await use_case.execute(review_id=review.id, user_id=voter_id, is_helpful=True)
     assert review.unhelpful_count == 0
     assert review.helpful_count == 1
+
+
+async def test_update_hidden_review_does_not_affect_rating(
+    uow: FakeUnitOfWork,
+    rating_repo: FakeTargetRatingRepository,
+    review_repo: FakeReviewRepository,
+    event_bus: FakeEventBus,
+) -> None:
+    target_id = uuid7()
+    user_id = uuid7()
+
+    rating = TargetRating.create_empty(target_id)
+    await rating_repo.save(rating)
+
+    review = Review.create(target_id=target_id, user_id=user_id, score=2, content="Hidden review text.")
+    review.hide()
+    await review_repo.save(review)
+
+    use_case = UpdateReviewUseCase(
+        uow=uow,
+        review_repo=review_repo,
+        rating_repo=rating_repo,
+        event_bus=event_bus,
+    )
+    dto = UpdateReviewDTO(score=5, content="Updated text while hidden.", version=1)
+    await use_case.execute(target_id=target_id, review_id=review.id, user_id=user_id, dto=dto)
+
+    assert review.score == 5
+    updated_rating = await rating_repo.get_by_target_id(target_id)
+    assert updated_rating is not None
+    assert updated_rating.total_reviews == 0
+    assert updated_rating.star_5_count == 0
+
+
+async def test_delete_hidden_review_does_not_decrement_rating_twice(
+    uow: FakeUnitOfWork,
+    rating_repo: FakeTargetRatingRepository,
+    review_repo: FakeReviewRepository,
+    event_bus: FakeEventBus,
+) -> None:
+    target_id = uuid7()
+    user_id = uuid7()
+
+    # Suppose target has 1 active review (score 5) and 1 hidden review (score 5)
+    rating = TargetRating.create_empty(target_id)
+    rating.apply_new_review(5)
+    await rating_repo.save(rating)
+
+    hidden_review = Review.create(target_id=target_id, user_id=user_id, score=5, content="Already hidden review.")
+    hidden_review.hide()
+    await review_repo.save(hidden_review)
+
+    delete_uc = DeleteReviewUseCase(
+        uow=uow,
+        review_repo=review_repo,
+        rating_repo=rating_repo,
+        event_bus=event_bus,
+    )
+    await delete_uc.execute(
+        target_id=target_id,
+        review_id=hidden_review.id,
+        user_id=user_id,
+    )
+
+    assert hidden_review.is_active is False
+    updated_rating = await rating_repo.get_by_target_id(target_id)
+    assert updated_rating is not None
+    assert updated_rating.total_reviews == 1
+    assert updated_rating.star_5_count == 1
+
+
+async def test_moderate_review_invalid_action_and_missing_rating(
+    uow: FakeUnitOfWork,
+    rating_repo: FakeTargetRatingRepository,
+    review_repo: FakeReviewRepository,
+    event_bus: FakeEventBus,
+) -> None:
+    target_id = uuid7()
+    review = Review.create(target_id=target_id, user_id=uuid7(), score=4, content="Review without rating row.")
+    review.hide()
+    await review_repo.save(review)
+
+    use_case = ModerateReviewUseCase(
+        uow=uow,
+        review_repo=review_repo,
+        rating_repo=rating_repo,
+        event_bus=event_bus,
+    )
+
+    # 1. Invalid action raises DomainException
+    with pytest.raises(DomainException, match="Невідома дія модерації"):
+        await use_case.execute(review_id=review.id, action="unknown_action")
+
+    # 2. Publishing hidden review when TargetRating does not exist creates TargetRating
+    await use_case.execute(review_id=review.id, action="publish")
+    created_rating = await rating_repo.get_by_target_id(target_id)
+    assert created_rating is not None
+    assert created_rating.total_reviews == 1
+    assert created_rating.star_4_count == 1

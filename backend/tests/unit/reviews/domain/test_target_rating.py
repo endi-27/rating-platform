@@ -196,3 +196,28 @@ def test_apply_deleted_review_all_scores() -> None:
     rating.apply_deleted_review(4)
     assert rating.star_4_count == 0
     assert rating.total_reviews == 0
+
+
+def test_apply_updated_review_to_5_and_validation() -> None:
+    rating = TargetRating.create_empty(uuid7())
+    rating.apply_new_review(4)
+    assert rating.star_4_count == 1
+
+    # 4 -> 5 branch
+    rating.apply_updated_review(4, 5)
+    assert rating.star_4_count == 0
+    assert rating.star_5_count == 1
+    assert rating.average_score == Decimal("5.00")
+
+    # Invalid scores in apply_updated_review and apply_deleted_review
+    with pytest.raises(InvalidScoreException):
+        rating.apply_updated_review(0, 5)
+
+    with pytest.raises(InvalidScoreException):
+        rating.apply_updated_review(5, 6)
+
+    with pytest.raises(InvalidScoreException):
+        rating.apply_deleted_review(0)
+
+    with pytest.raises(InvalidScoreException):
+        rating.apply_new_review(True)  # type: ignore[arg-type]

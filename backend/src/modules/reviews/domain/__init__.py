@@ -1,3 +1,4 @@
+from src.modules.reviews.domain.enums import ReviewStatus
 from src.modules.reviews.domain.events import (
     ReviewCreatedEvent,
     ReviewDeletedEvent,
@@ -41,6 +42,7 @@ __all__ = [
     "ReviewCreatedEvent",
     "ReviewDeletedEvent",
     "ReviewNotFoundException",
+    "ReviewStatus",
     "ReviewUpdatedEvent",
     "ReviewVote",
     "ReviewVoteAlreadyExistsException",

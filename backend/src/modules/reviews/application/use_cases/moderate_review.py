@@ -1,9 +1,10 @@
 from uuid import UUID
 
-from src.core import IEventBus, IUnitOfWork, logger
+from src.core import DomainException, IEventBus, IUnitOfWork, logger
 from src.modules.reviews.domain.events import ReviewUpdatedEvent
 from src.modules.reviews.domain.exceptions import ReviewNotFoundException
 from src.modules.reviews.domain.interfaces import IReviewRepository, ITargetRatingRepository
+from src.modules.reviews.domain.models import TargetRating
 from src.utils import check_optimistic_lock
 
 
@@ -39,15 +40,20 @@ class ModerateReviewUseCase:
                 review.publish()
             elif action == "flag":
                 review.flag()
+            else:
+                raise DomainException(f"Невідома дія модерації: '{action}'. Дозволено: hide, publish, flag.")
 
             is_now_counted = review.is_counted_in_rating
             if was_counted != is_now_counted:
                 rating = await self._rating_repo.get_by_target_id(review.target_id)
-                if rating is not None:
-                    if was_counted and not is_now_counted:
+                if was_counted and not is_now_counted:
+                    if rating is not None:
                         rating.apply_deleted_review(review.score)
-                    elif not was_counted and is_now_counted:
-                        rating.apply_new_review(review.score)
+                        await self._rating_repo.save(rating)
+                elif not was_counted and is_now_counted:
+                    if rating is None:
+                        rating = TargetRating.create_empty(review.target_id)
+                    rating.apply_new_review(review.score)
                     await self._rating_repo.save(rating)
 
             await self._review_repo.save(review)

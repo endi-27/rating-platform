@@ -44,3 +44,52 @@ async def test_redis_crud_operations() -> None:
     finally:
         await client.aclose()  # type: ignore[attr-defined]
         await close_redis()
+
+
+@pytest.mark.asyncio
+async def test_redis_set_buffer_operations() -> None:
+    """Перевірка функціонування розподіленого буфера RedisSetBuffer проти реального Redis."""
+    from uuid6 import uuid7
+
+    from src.infrastructure.redis import RedisSetBuffer
+
+    client = get_redis_client()
+    buffer = RedisSetBuffer(redis=client)
+    test_key = "rating:test:set_buffer_test"
+
+    try:
+        await client.delete(test_key)
+
+        id1 = uuid7()
+        id2 = uuid7()
+        id3 = uuid7()
+
+        # 1. Додавання
+        added = await buffer.add(test_key, id1, id2, id3)
+        assert added == 3
+
+        # 2. Ідемпотентність
+        added_duplicate = await buffer.add(test_key, id1)
+        assert added_duplicate == 0
+
+        # 3. Підрахунок
+        count = await buffer.count(test_key)
+        assert count == 3
+
+        # 4. Вилучення пачки
+        batch = await buffer.pop_batch(test_key, batch_size=2)
+        assert len(batch) == 2
+        assert all(isinstance(x, str) for x in batch)
+
+        # 5. Залишок
+        remaining_count = await buffer.count(test_key)
+        assert remaining_count == 1
+
+        # 6. Вилучення залишку
+        final_batch = await buffer.pop_batch(test_key, batch_size=10)
+        assert len(final_batch) == 1
+        assert await buffer.count(test_key) == 0
+    finally:
+        await client.delete(test_key)
+        await client.aclose()  # type: ignore[attr-defined]
+        await close_redis()

@@ -4,6 +4,7 @@ from uuid import UUID
 from sqlalchemy import func, select
 
 from src.infrastructure.db.repositories.base_crud_repository import SqlAlchemyBaseCrudRepository
+from src.modules.reviews.domain.enums import ReviewStatus
 from src.modules.reviews.domain.interfaces import IReviewRepository
 from src.modules.reviews.domain.models.review import Review
 from src.modules.reviews.infrastructure.mappers.review_mapper import ReviewMapper
@@ -40,7 +41,7 @@ class SqlAlchemyReviewRepository(SqlAlchemyBaseCrudRepository[Review, ReviewMode
         self,
         target_id: UUID,
         *,
-        status: str = "published",
+        status: ReviewStatus | str = ReviewStatus.PUBLISHED,
         limit: int = 20,
         offset: int = 0,
     ) -> Sequence[Review]:
@@ -58,7 +59,12 @@ class SqlAlchemyReviewRepository(SqlAlchemyBaseCrudRepository[Review, ReviewMode
         res = await self._session.execute(stmt)
         return [ReviewMapper.to_domain(orm) for orm in res.scalars().all()]
 
-    async def count_by_target(self, target_id: UUID, *, status: str = "published") -> int:
+    async def count_by_target(
+        self,
+        target_id: UUID,
+        *,
+        status: ReviewStatus | str = ReviewStatus.PUBLISHED,
+    ) -> int:
         stmt = (
             select(func.count())
             .select_from(ReviewModel)

@@ -4,6 +4,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field
 
+from src.modules.reviews.domain.enums import ReviewStatus
+
 
 class TargetFilterDTO(BaseModel):
     """Параметри фільтрації списку об'єктів оцінювання."""
@@ -18,7 +20,7 @@ class ReviewFilterDTO(BaseModel):
     """Параметри фільтрації стрічки відгуків об'єкта."""
 
     target_id: Annotated[UUID, Field(description="ID об'єкта оцінювання (Shard Key)")]
-    status: Annotated[str, Field(description="Статус модерації відгуку")] = "published"
+    status: Annotated[ReviewStatus, Field(description="Статус модерації відгуку")] = ReviewStatus.PUBLISHED
     score: Annotated[int | None, Field(ge=1, le=5, description="Фільтр за точною оцінкою (1..5)")] = None
     min_score: Annotated[int | None, Field(ge=1, le=5, description="Мінімальна оцінка зірок")] = None
     author_id: Annotated[UUID | None, Field(description="Фільтр за автором відгуку")] = None

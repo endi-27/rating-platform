@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Any, Protocol
+from uuid import UUID
 
 
 class IUnitOfWork(Protocol):
@@ -35,4 +36,20 @@ class IPasswordHasher(Protocol):
 
     def verify(self, plain_password: str, hashed_password: str) -> bool:
         """Перевірка відповідності відкритого пароля збереженому хешу."""
+        ...
+
+
+class ISetBuffer(Protocol):
+    """Абстрактний протокол розподіленого буфера на базі множин (Set Buffer) для довільних модулів платформи."""
+
+    async def add(self, key: str, *values: str | UUID) -> int:
+        """Додати один або кілька елементів у буфер за вказаним ключем (idempotent O(1))."""
+        ...
+
+    async def pop_batch(self, key: str, batch_size: int = 100) -> list[str]:
+        """Атомарно вилучити до batch_size елементів із буфера за вказаним ключем."""
+        ...
+
+    async def count(self, key: str) -> int:
+        """Повернути поточну кількість елементів у буфері за вказаним ключем."""
         ...

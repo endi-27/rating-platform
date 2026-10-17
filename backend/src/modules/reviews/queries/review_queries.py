@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.api.schemas.pagination import PaginatedResponse, PaginationParams
 from src.api.schemas.sorting import MultiSort, apply_sorting
 from src.infrastructure.db.queries.base import BaseQueryService
+from src.modules.reviews.domain.enums import ReviewStatus
 from src.modules.reviews.infrastructure.models.review_model import ReviewModel
 from src.modules.reviews.queries.dto import ReviewResponseDTO
 from src.modules.reviews.queries.filters import ReviewFilterDTO
@@ -38,7 +39,7 @@ class ReviewQueryService(BaseQueryService):
             score=orm.score,
             title=orm.title,
             content=orm.content,
-            status=orm.status,
+            status=ReviewStatus(orm.status),
             helpful_count=orm.helpful_count,
             unhelpful_count=orm.unhelpful_count,
             version=orm.version,

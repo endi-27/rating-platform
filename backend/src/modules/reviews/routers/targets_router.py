@@ -87,7 +87,7 @@ async def list_targets(
     summary="Картка об'єкта оцінювання",
     description="Отримання детальної інформації про об'єкт за UUID або текстовим slug із кешуванням Redis.",
 )
-@cache(expire=3600, namespace=settings.cache.namespace.targets)
+@cache(expire=settings.cache.targets_expire, namespace=settings.cache.namespace.targets)
 async def get_target_details(
     id_or_slug: str,
     query_service: Annotated[TargetQueryService, Depends(get_target_query_service)],

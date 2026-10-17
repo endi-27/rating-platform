@@ -318,3 +318,8 @@ async def test_list_targets_filter_min_rating(
     for item in data["items"]:
         if "rating" in item and item["rating"] and "average_score" in item["rating"]:
             assert float(item["rating"]["average_score"]) >= 4.0
+
+    # Перевірка сортування за рейтинговими полями (average_score, bayesian_score, total_reviews)
+    for sort_field in ("-average_score", "-bayesian_score", "-total_reviews"):
+        sort_resp = await api_client.get("/api/v1/targets", params={"sort": sort_field})
+        assert sort_resp.status_code == 200

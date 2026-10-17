@@ -3,6 +3,7 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from uuid import UUID
 
+from src.modules.reviews.domain.enums import ReviewStatus
 from src.modules.reviews.domain.interfaces import (
     IReviewRepository,
     IReviewVoteRepository,
@@ -111,7 +112,7 @@ class FakeReviewRepository(IReviewRepository):
         self,
         target_id: UUID,
         *,
-        status: str = "published",
+        status: ReviewStatus | str = ReviewStatus.PUBLISHED,
         limit: int = 20,
         offset: int = 0,
     ) -> Sequence[Review]:
@@ -119,7 +120,12 @@ class FakeReviewRepository(IReviewRepository):
         items.sort(key=lambda x: x.created_at, reverse=True)
         return items[offset : offset + limit]
 
-    async def count_by_target(self, target_id: UUID, *, status: str = "published") -> int:
+    async def count_by_target(
+        self,
+        target_id: UUID,
+        *,
+        status: ReviewStatus | str = ReviewStatus.PUBLISHED,
+    ) -> int:
         return len(
             [r for r in self.reviews.values() if r.target_id == target_id and r.status == status and r.is_active]
         )

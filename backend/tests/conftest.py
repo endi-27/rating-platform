@@ -159,18 +159,11 @@ def mock_task_dispatcher() -> Generator[AsyncMock, None, None]:
     Автоматичний мок для диспетчера задач ARQ.
     Запобігає спаму задач у чергу Redis під час тестів.
     """
-    with (
-        patch(
-            "src.tasks.dispatcher.TaskDispatcher.enqueue_cleanup_temp_files",
-            new_callable=AsyncMock,
-            return_value="mocked-job-id",
-        ) as mock_enqueue,
-        patch(
-            "src.tasks.dispatcher.TaskDispatcher.enqueue_recalculate_bayesian_rating",
-            new_callable=AsyncMock,
-            return_value="mocked-rating-job-id",
-        ),
-    ):
+    with patch(
+        "src.tasks.dispatcher.TaskDispatcher.enqueue_cleanup_temp_files",
+        new_callable=AsyncMock,
+        return_value="mocked-job-id",
+    ) as mock_enqueue:
         yield mock_enqueue
 
 

@@ -7,6 +7,7 @@ from decimal import Decimal
 from typing import Protocol
 from uuid import UUID
 
+from src.modules.reviews.domain.enums import ReviewStatus
 from src.modules.reviews.domain.models import Review, ReviewVote, Target, TargetRating
 
 
@@ -121,7 +122,7 @@ class IReviewRepository(ABC):
         self,
         target_id: UUID,
         *,
-        status: str = "published",
+        status: ReviewStatus | str = ReviewStatus.PUBLISHED,
         limit: int = 20,
         offset: int = 0,
     ) -> Sequence[Review]:
@@ -129,7 +130,12 @@ class IReviewRepository(ABC):
         ...
 
     @abstractmethod
-    async def count_by_target(self, target_id: UUID, *, status: str = "published") -> int:
+    async def count_by_target(
+        self,
+        target_id: UUID,
+        *,
+        status: ReviewStatus | str = ReviewStatus.PUBLISHED,
+    ) -> int:
         """Підрахунок кількості відгуків об'єкта."""
         ...
 

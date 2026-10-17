@@ -1,59 +1,52 @@
-from uuid import UUID
-
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from src.core import logger
+from src.core import ISetBuffer, settings
+from src.infrastructure import (
+    SqlAlchemyUnitOfWork,
+    clear_cache_with_dependencies,
+    get_set_buffer,
+)
+from src.modules.reviews.application.use_cases import BatchRecalculateRatingsUseCase
 from src.modules.reviews.infrastructure.repositories import SqlAlchemyTargetRatingRepository
 
 
-async def recalculate_bayesian_rating_task(
+async def process_dirty_target_ratings_task(
     ctx: dict[str, object],
-    target_id: str,
+    batch_size: int = 100,
 ) -> dict[str, object]:
     """
-    Фонова задача ARQ для перерахунку зваженого байєсівського рейтингу.
-    Виконується асинхронно, щоб не блокувати клієнтський HTTP-запит створення відгуку.
+    Періодична cron-задача ARQ:
+    Пакетно вилучає об'єкти з черги на перерахунок, один раз обчислює global_mean
+    та оновлює рейтинги об'єктів без лавиноподібного навантаження (Thundering Herd).
     """
+    buffer: ISetBuffer | None = ctx.get("set_buffer") or ctx.get("rating_buffer")  # type: ignore[assignment]
+    if buffer is None:
+        buffer = get_set_buffer()
+
     session_factory: async_sessionmaker[AsyncSession] | None = ctx.get("session_factory")  # type: ignore[assignment]
     if session_factory is None:
         raise RuntimeError("У контексті ARQ воркера відсутня фабрика сесій 'session_factory'")
 
-    target_uuid = UUID(target_id) if isinstance(target_id, str) else target_id
-
+    total_processed = 0
     async with session_factory() as session:
+        uow = SqlAlchemyUnitOfWork(session=session)
         rating_repo = SqlAlchemyTargetRatingRepository(session)
-        rating = await rating_repo.get_by_target_id(target_uuid)
-
-        if rating is None:
-            logger.warning(
-                "[ARQ Task: Recalculate Rating] Об'єкт target_id='{id}' не знайдено",
-                id=str(target_uuid),
-            )
-            return {"status": "not_found", "target_id": str(target_uuid)}
-
-        # 1. Отримання глобального середнього балу по платформі
-        global_mean = await rating_repo.get_global_mean_score()
-
-        # 2. Розрахунок формули Байєса
-        bayesian = rating.calculate_bayesian_score(
-            min_votes_threshold=5,
-            global_mean=global_mean,
+        use_case = BatchRecalculateRatingsUseCase(
+            uow=uow,
+            rating_repo=rating_repo,
+            buffer=buffer,
         )
+        while True:
+            processed = await use_case.execute(batch_size=batch_size)
+            total_processed += processed
+            if processed < batch_size:
+                break
 
-        await rating_repo.save(rating)
-        await session.commit()
+    if total_processed > 0:
+        await clear_cache_with_dependencies(settings.cache.namespace.targets)
+        await clear_cache_with_dependencies(settings.cache.namespace.reviews)
 
-        logger.info(
-            "[ARQ Task: Recalculate Rating] Оновлено Bayesian Score для target_id='{id}': {score} (global_mean={mean})",
-            id=str(target_uuid),
-            score=str(bayesian),
-            mean=str(global_mean),
-        )
-
-        return {
-            "status": "success",
-            "target_id": str(target_uuid),
-            "bayesian_score": float(bayesian),
-            "average_score": float(rating.average_score),
-            "total_reviews": rating.total_reviews,
-        }
+    return {
+        "status": "success",
+        "processed": total_processed,
+    }

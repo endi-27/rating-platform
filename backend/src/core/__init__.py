@@ -18,7 +18,7 @@ from src.core.database import (
     get_db_session,
 )
 from src.core.domain import AggregateRoot, BaseEntity
-from src.core.enums import PermissionCode, RoleCode, SystemRole
+from src.core.enums import PermissionCode, SystemRole
 from src.core.exceptions import (
     AccountDeactivatedException,
     AppException,
@@ -44,6 +44,7 @@ from src.core.masking import MASKED_VALUE, is_sensitive_key, mask_sensitive_data
 from src.core.protocols import (
     IEventBus,
     IPasswordHasher,
+    ISetBuffer,
     IUnitOfWork,
 )
 from src.core.redis import close_redis, get_redis_client, get_redis_pool
@@ -72,6 +73,7 @@ __all__ = [
     "ForbiddenException",
     "IEventBus",
     "IPasswordHasher",
+    "ISetBuffer",
     "IUnitOfWork",
     "InactiveEntityError",
     "InvalidCredentialsException",
@@ -84,7 +86,6 @@ __all__ = [
     "ResourceAlreadyActiveException",
     "ResourceAlreadyInactiveException",
     "ResourceLockedException",
-    "RoleCode",
     "Settings",
     "SystemRole",
     "UnauthorizedException",

@@ -1,5 +1,4 @@
 from typing import Any
-from uuid import UUID
 
 from arq import create_pool
 from arq.connections import ArqRedis
@@ -57,12 +56,6 @@ class TaskDispatcher:
         from src.tasks.functions import cleanup_expired_temp_files_task
 
         return await self._enqueue_task(cleanup_expired_temp_files_task.__name__)
-
-    async def enqueue_recalculate_bayesian_rating(self, target_id: UUID) -> str | None:
-        """Типізована відправка задачі перерахунку зваженого байєсівського рейтингу."""
-        from src.tasks.functions import recalculate_bayesian_rating_task
-
-        return await self._enqueue_task(recalculate_bayesian_rating_task.__name__, str(target_id))
 
     async def close(self) -> None:
         """Закриття клієнтського пулу ARQ."""

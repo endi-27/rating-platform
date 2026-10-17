@@ -31,7 +31,7 @@ class TargetRating:
         return cls(target_id=target_id)
 
     def _validate_score(self, score: int) -> None:
-        if not (1 <= score <= 5):
+        if isinstance(score, bool) or not (1 <= score <= 5):
             raise InvalidScoreException(score)
 
     def _recalculate_average(self) -> None:

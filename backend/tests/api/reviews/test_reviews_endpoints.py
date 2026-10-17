@@ -661,3 +661,93 @@ async def test_reviews_unhappy_paths_and_filters(
         cookies=author_cookies,
     )
     assert vote_422.status_code == 422
+
+
+async def test_vote_switching_and_moderation_rating_sync_via_api(
+    api_client: AsyncClient,
+    superadmin_cookies: dict[str, str],
+    no_permissions_cookies: dict[str, str],
+    db_session: AsyncSession,
+    user_role: RoleModel,
+    auth_cookies_factory: Callable[[dict[str, Any] | None], dict[str, str]],
+) -> None:
+    # 1. Створення Target та Review
+    target_resp = await api_client.post(
+        "/api/v1/targets",
+        json={"slug": f"target-sync-{uuid7().hex[:8]}", "title": "Sync Target", "category": "movie"},
+        cookies=superadmin_cookies,
+    )
+    target_id = target_resp.json()["id"]
+
+    author = await _create_user(db_session, user_role, prefix="author_sync")
+    author_cookies = auth_cookies_factory({"sub": str(author.id), "role": "user"})
+    rev_resp = await api_client.post(
+        f"/api/v1/targets/{target_id}/reviews",
+        json={"score": 5, "content": "Detailed review for testing vote switching and moderation."},
+        cookies=author_cookies,
+    )
+    assert rev_resp.status_code == 201
+    review_id = rev_resp.json()["id"]
+
+    # 2. Voter голосує helpful=True, а потім змінює на helpful=False
+    voter = await _create_user(db_session, user_role, prefix="voter_sync")
+    voter_cookies = auth_cookies_factory({"sub": str(voter.id), "role": "user"})
+
+    v1 = await api_client.post(
+        f"/api/v1/reviews/{review_id}/vote",
+        json={"is_helpful": True},
+        cookies=voter_cookies,
+    )
+    assert v1.status_code == 200
+
+    v2 = await api_client.post(
+        f"/api/v1/reviews/{review_id}/vote",
+        json={"is_helpful": False},
+        cookies=voter_cookies,
+    )
+    assert v2.status_code == 200
+    assert v2.json()["is_helpful"] is False
+
+    # Перевіряємо лічильники у видачі відгуків та сортування за helpful_count
+    list_resp = await api_client.get(
+        f"/api/v1/targets/{target_id}/reviews",
+        params={"sort": "-helpful_count"},
+    )
+    assert list_resp.status_code == 200
+    item = list_resp.json()["items"][0]
+    assert item["helpful_count"] == 0
+    assert item["unhelpful_count"] == 1
+
+    # 3. Перевірка RBAC 403 без дозволів для PUT та DELETE
+    put_no_perm = await api_client.put(
+        f"/api/v1/targets/{target_id}/reviews/{review_id}",
+        json={"score": 4, "content": "Updated content without permission.", "version": 1},
+        cookies=no_permissions_cookies,
+    )
+    assert put_no_perm.status_code == 403
+
+    del_no_perm = await api_client.delete(
+        f"/api/v1/targets/{target_id}/reviews/{review_id}",
+        cookies=no_permissions_cookies,
+    )
+    assert del_no_perm.status_code == 403
+
+    # 4. Модерація: hide -> перевірка фільтра status=hidden та синхронного зменшення рейтингу
+    hide_resp = await api_client.patch(
+        f"/api/v1/reviews/{review_id}/moderate",
+        json={"action": "hide"},
+        cookies=superadmin_cookies,
+    )
+    assert hide_resp.status_code == 200
+    assert hide_resp.json()["status"] == "hidden"
+
+    rating_after_hide = await api_client.get(f"/api/v1/targets/{target_id}/rating")
+    assert rating_after_hide.status_code == 200
+    assert rating_after_hide.json()["total_reviews"] == 0
+
+    hidden_list = await api_client.get(
+        f"/api/v1/targets/{target_id}/reviews",
+        params={"status": "hidden"},
+    )
+    assert hidden_list.status_code == 200
+    assert hidden_list.json()["total"] == 1

@@ -104,8 +104,22 @@ class CacheNamespaceSettings(BaseModel):
 
 class CacheSettings(BaseModel):
     prefix: Annotated[str, Field(description="Redis cache key prefix")] = "rating_cache"
-    expire: Annotated[int, Field(description="Default cache TTL in seconds", ge=1)] = 7200
+    expire: Annotated[int, Field(description="Default cache TTL in seconds", ge=1)] = 60
+    targets_expire: Annotated[int, Field(description="Target details cache TTL in seconds", ge=1)] = 60
+    reviews_expire: Annotated[int, Field(description="Reviews and ratings cache TTL in seconds", ge=1)] = 30
     namespace: CacheNamespaceSettings = CacheNamespaceSettings()
+
+
+class RedisSetSettings(BaseModel):
+    prefix: Annotated[str, Field(description="Redis Set key prefix")] = "rating_set"
+    dirty_targets: Annotated[str, Field(description="Redis Set key for targets awaiting rating recalculation")] = (
+        "ratings:dirty_targets"
+    )
+
+    @property
+    def dirty_targets_key(self) -> str:
+        """Повний складений ключ для черги перерахунку рейтингів."""
+        return f"{self.prefix}:{self.dirty_targets}"
 
 
 class LogSettings(BaseModel):
@@ -166,6 +180,7 @@ class Settings(BaseSettings):
     api: ApiSettings = ApiSettings()
     arq: ArqSettings = ArqSettings()
     cache: CacheSettings = CacheSettings()
+    redis_sets: RedisSetSettings = RedisSetSettings()
     log: LogSettings = LogSettings()
     storage: StorageSettings = StorageSettings()
     seed: SeedSettings = SeedSettings()

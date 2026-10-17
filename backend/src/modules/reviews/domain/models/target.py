@@ -27,6 +27,9 @@ class Target(AggregateRoot):
         self.slug = self.slug.strip().lower()
         self.title = self.title.strip()
         self.category = self.category.strip().lower()
+        if self.description is not None:
+            clean_desc = self.description.strip()
+            self.description = clean_desc if clean_desc else None
 
         if not self.slug:
             raise DomainException("URL-ідентифікатор (slug) об'єкта не може бути порожнім.")
@@ -52,7 +55,7 @@ class Target(AggregateRoot):
             slug=slug,
             title=title,
             category=category,
-            description=description.strip() if description else None,
+            description=description.strip() if description and description.strip() else None,
             metadata=dict(metadata or {}),
             created_by_id=created_by_id,
         )

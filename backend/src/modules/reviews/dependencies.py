@@ -6,9 +6,11 @@ from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api import get_read_db_session, get_uow
-from src.core import IEventBus, IUnitOfWork, get_db_session
+from src.core import IEventBus, ISetBuffer, IUnitOfWork, get_db_session
 from src.core.events import get_event_bus
+from src.infrastructure import get_set_buffer
 from src.modules.reviews.application.use_cases import (
+    BatchRecalculateRatingsUseCase,
     CreateReviewUseCase,
     CreateTargetUseCase,
     DeleteReviewUseCase,
@@ -201,4 +203,16 @@ def get_moderate_review_uc(
         review_repo=review_repo,
         rating_repo=rating_repo,
         event_bus=event_bus,
+    )
+
+
+def get_batch_recalculate_ratings_uc(
+    uow: Annotated[IUnitOfWork, Depends(get_uow)],
+    rating_repo: Annotated[ITargetRatingRepository, Depends(get_target_rating_repo)],
+    buffer: Annotated[ISetBuffer, Depends(get_set_buffer)],
+) -> BatchRecalculateRatingsUseCase:
+    return BatchRecalculateRatingsUseCase(
+        uow=uow,
+        rating_repo=rating_repo,
+        buffer=buffer,
     )

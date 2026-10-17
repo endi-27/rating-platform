@@ -11,6 +11,9 @@ from sqlalchemy import (
     Text,
     text,
 )
+from sqlalchemy import (
+    Enum as SQLEnum,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from src.infrastructure.db.base import (
@@ -20,6 +23,7 @@ from src.infrastructure.db.base import (
     UUIDPrimaryKeyMixin,
     VersionedMixin,
 )
+from src.modules.reviews.domain.enums import ReviewStatus
 
 if TYPE_CHECKING:
     from src.modules.reviews.infrastructure.models.review_vote_model import ReviewVoteModel
@@ -44,7 +48,17 @@ class ReviewModel(Base, UUIDPrimaryKeyMixin, VersionedMixin, TimestampMixin, Sof
     score: Mapped[int] = mapped_column(SmallInteger, nullable=False)
     title: Mapped[str | None] = mapped_column(String(150), nullable=True)
     content: Mapped[str] = mapped_column(Text, nullable=False)
-    status: Mapped[str] = mapped_column(String(20), server_default="published", default="published", nullable=False)
+    status: Mapped[ReviewStatus] = mapped_column(
+        SQLEnum(
+            ReviewStatus,
+            native_enum=False,
+            length=20,
+            values_callable=lambda obj: [e.value for e in obj],
+        ),
+        server_default=ReviewStatus.PUBLISHED.value,
+        default=ReviewStatus.PUBLISHED,
+        nullable=False,
+    )
     helpful_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     unhelpful_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
 
@@ -66,5 +80,6 @@ class ReviewModel(Base, UUIDPrimaryKeyMixin, VersionedMixin, TimestampMixin, Sof
             postgresql_where=text("deleted_at IS NULL"),
         ),
         CheckConstraint("score >= 1 AND score <= 5", name="ck_reviews_score_range"),
+        CheckConstraint("status IN ('published', 'hidden', 'flagged')", name="ck_reviews_status"),
         Index("ix_reviews_target_status_created", "target_id", "status", "created_at"),
     )

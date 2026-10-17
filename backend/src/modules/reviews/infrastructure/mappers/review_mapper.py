@@ -1,3 +1,4 @@
+from src.modules.reviews.domain.enums import ReviewStatus
 from src.modules.reviews.domain.models.review import Review
 from src.modules.reviews.infrastructure.models.review_model import ReviewModel
 
@@ -15,7 +16,7 @@ class ReviewMapper:
             score=model.score,
             title=model.title,
             content=model.content,
-            status=model.status,
+            status=ReviewStatus(model.status),
             helpful_count=model.helpful_count,
             unhelpful_count=model.unhelpful_count,
             created_at=model.created_at,
