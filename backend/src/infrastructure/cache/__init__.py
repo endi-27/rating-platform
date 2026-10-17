@@ -1,4 +1,5 @@
 from src.infrastructure.cache.backend import (
+    CacheFallbackState,
     SafeJsonCoder,
     SafeRedisBackend,
     cache_fallback_ctx,
@@ -19,6 +20,7 @@ from src.infrastructure.cache.key_builders import (
 from src.infrastructure.cache.setup import setup_cache
 
 __all__ = [
+    "CacheFallbackState",
     "DEFAULT_IGNORE_KEYS",
     "SafeJsonCoder",
     "SafeRedisBackend",

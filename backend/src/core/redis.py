@@ -18,6 +18,8 @@ def get_redis_pool(db: int | None = None) -> ConnectionPool[Any]:
             settings.redis.get_url(target_db),
             max_connections=20,
             decode_responses=True,
+            socket_connect_timeout=0.5,
+            socket_timeout=0.5,
         )
     return _redis_pools[target_db]
 

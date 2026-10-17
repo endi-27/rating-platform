@@ -10,8 +10,21 @@ from redis.asyncio import Redis
 
 from src.core import logger
 
+
+class CacheFallbackState:
+    """Контейнер стану відмови кешу для коректної передачі між asyncio контекстами."""
+
+    __slots__ = ("is_fallback",)
+
+    def __init__(self, is_fallback: bool = False) -> None:
+        self.is_fallback = is_fallback
+
+
 # Контекстна змінна для фіксації відмови Redis та виставлення заголовка X-Cache: FALLBACK
-cache_fallback_ctx: ContextVar[bool] = ContextVar("cache_fallback_ctx", default=False)
+cache_fallback_ctx: ContextVar[CacheFallbackState | None] = ContextVar(
+    "cache_fallback_ctx",
+    default=None,
+)
 
 
 async def delete_by_pattern(redis: Redis[Any], pattern: str, batch_size: int = 200) -> int:
@@ -53,7 +66,8 @@ class SafeRedisBackend(RedisBackend):
                 val = val.encode("utf-8")
             return ttl, val
         except Exception as exc:
-            cache_fallback_ctx.set(True)
+            if state := cache_fallback_ctx.get():
+                state.is_fallback = True
             logger.warning(
                 "Помилка отримання ключа '{key}' з Redis кешу: {err}",
                 key=key,
@@ -68,6 +82,8 @@ class SafeRedisBackend(RedisBackend):
                 return val.encode("utf-8")
             return val
         except Exception as exc:
+            if state := cache_fallback_ctx.get():
+                state.is_fallback = True
             logger.warning(
                 "Помилка читання ключа '{key}' з Redis кешу: {err}",
                 key=key,
@@ -79,6 +95,8 @@ class SafeRedisBackend(RedisBackend):
         try:
             await super().set(key, value, expire=expire)
         except Exception as exc:
+            if state := cache_fallback_ctx.get():
+                state.is_fallback = True
             logger.warning(
                 "Помилка запису ключа '{key}' у Redis кеш: {err}",
                 key=key,
