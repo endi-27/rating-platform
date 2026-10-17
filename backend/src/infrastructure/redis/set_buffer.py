@@ -31,7 +31,7 @@ class RedisSetBuffer(ISetBuffer):
 
     async def pop_batch(self, key: str, batch_size: int = 100) -> list[str]:
         """Атомарно вилучає до batch_size елементів із вказаної множини Redis."""
-        raw_members = await self._redis.spop(key, count=batch_size)  # type: ignore[arg-type]
+        raw_members = await self._redis.spop(key, count=batch_size)
         if not raw_members:
             return []
 

@@ -188,6 +188,32 @@ python3 scripts/load_balancing/run_experiments.py
 > * **Компактний протокол вимірів та висновків для викладача:** [**`docs/load-balancing-experiments.md`**](./docs/load-balancing-experiments.md).
 > * **Повний розширений інженерний звіт (теорія, Закон Амдала, усунення SPOF Nginx):** [**`docs/load-balancing.md`**](./docs/load-balancing.md).
 
+### Розподілене кешування Redis (Cache-Aside, Event-Driven Invalidation & Circuit Breaker)
+
+У рамках Лабораторної роботи №4 реалізовано розподілений шар in-memory кешування на базі **Redis 7** (`rating_redis`, DB 0) з кастомним бекендом `SafeRedisBackend`, інтелектуальним формуванням ключів (`key_builders.py`), реактивною інвалідацією за доменними подіями та захистом від збоїв (Graceful Degradation / Circuit Breaker).
+
+#### Зведені результати експериментів (Емпіричний бенчмарк)
+
+| Досліджуваний сценарій / Ендпоінт | Режим роботи | Cache Header | Latency Avg (мс) | Latency p95 (мс) | Throughput (RPS) | Наслідки для СУБД та стійкості |
+| :--- | :--- | :---: | :---: | :---: | :---: | :--- |
+| **`GET /targets/{id}` (Картка об'єкта)** | Cold (1-й запит) | `MISS` | 5.53 | 5.53 | — | Завантаження з PostgreSQL 16, прогрівання кешу (TTL 60с) |
+| **`GET /targets/{id}` (Картка об'єкта)** | Hot (50 reqs, C=5) | **`HIT` (100%)** | **6.27** | **9.02** | **758.14 RPS** | **0 звернень до БД**, стабільна хвостова затримка під навантаженням |
+| **`GET /targets/{id}/rating` (Рейтинг)** | Cold (1-й запит) | `MISS` | 6.10 | 6.10 | — | Обчислення зваженого рейтингу з БД, прогрівання кешу (TTL 30с) |
+| **`GET /targets/{id}/rating` (Рейтинг)** | Hot (50 reqs, C=5) | **`HIT` (100%)** | **6.09** | **9.04** | **757.99 RPS** | **0 звернень до БД**, швидка видача комплексного агрегату |
+| **Мутація: `PUT /targets/{id}` $\to$ GET** | Event Invalidation | **`MISS` $\to$ `HIT`** | 5.72 $\to$ **3.31** | — | — | Доменна подія `TargetUpdatedEvent` скинула кеш (`scan_iter`); свіжі дані |
+| **Аварія: зупинка `rating_redis`** | Graceful Fallback | **`FALLBACK` (100%)** | 1062.96 | 1502.04 | 1.80 RPS | **100% 200 OK (0% 5xx)**; прозоре резервне читання з PostgreSQL |
+| **Відновлення: старт `rating_redis`** | Cache Recovery | **`HIT` (100%)** | **6.91** | — | — | Перехід у `healthy` за **5.1 с**, відновлення зі збереженого тому `redis_data` |
+
+#### Запуск комплексу експериментів з кешування
+```bash
+# Запуск повного циклу бенчмаркінгу розподіленого кешування (ЛР №4):
+python3 scripts/caching/run_cache_experiments.py
+```
+
+> [!NOTE]
+> * **Компактний протокол вимірів для викладача:** [**`docs/caching-experiments.md`**](./docs/caching-experiments.md).
+> * **Повний розширений інженерний звіт та теорія захисту (Cache Stampede, Avalanche, Eviction, Invalidation):** [**`docs/distributed-caching.md`**](./docs/distributed-caching.md).
+
 ### Піковий сценарій навантаження (High-Load Scenario)
 
 **Сценарій:** масовий наплив користувачів після релізу популярного об'єкта (співвідношення читання до запису — ~95% Read / 5% Write).
@@ -226,7 +252,7 @@ python3 scripts/load_balancing/run_experiments.py
 | Реалізація модулів `auth` та `users` (JWT cookies, RBAC, шлюзи) | **A / R** | **I** |
 | Реалізація модуля `reviews` (доменні моделі, Use Cases, Query Services, OCC) | **A / R** | **I** |
 | Міграції Alembic, індекси та обмеження цілісності PostgreSQL | **A / R** | **R** |
-| Кешування Redis (Cache-Aside, Circuit Breaker) та фоновий воркер ARQ | **A / R** | **C** |
+| Кешування Redis (ЛР №4: Cache-Aside, Circuit Breaker, Event-Driven інвалідація) — Реалізовано у ЛР №4 | **A / R** | **C** |
 | Контейнеризація застосунку (`Dockerfile`, `docker-compose.yaml`, масштабування інстансів `backend_1`, `backend_2`, `backend_3`) | **C** | **A / R** |
 | Масштабування (ЛР №3: 3 інстанси FastAPI, динамічне балансування, бенчмаркінг алгоритмів) — Реалізовано у ЛР №3 | **C** | **A / R** |
 | Оркестрація автоміграцій (`rating_migrator`) та сідування SuperAdmin | **C** | **A / R** |

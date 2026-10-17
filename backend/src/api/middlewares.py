@@ -14,7 +14,7 @@ from src.core import (
     set_correlation_id,
     settings,
 )
-from src.infrastructure.cache import cache_fallback_ctx
+from src.infrastructure.cache import CacheFallbackState, cache_fallback_ctx
 
 
 async def request_logger_middleware(
@@ -26,7 +26,8 @@ async def request_logger_middleware(
     request_id = incoming_id.strip() if incoming_id and incoming_id.strip() else uuid7().hex[:12]
     client_ip = request.client.host if request.client else "unknown"
     set_correlation_id(request_id)
-    cache_fallback_ctx.set(False)
+    fallback_state = CacheFallbackState(is_fallback=False)
+    cache_fallback_ctx.set(fallback_state)
 
     with logger.contextualize(request_id=request_id, client_ip=client_ip):
         start_time = time.perf_counter()
@@ -56,7 +57,7 @@ async def request_logger_middleware(
             response.headers["X-Request-ID"] = request_id
             response.headers["X-Instance-ID"] = settings.instance_id
             response.headers["X-Process-Time-Ms"] = str(process_time)
-            if cache_fallback_ctx.get():
+            if fallback_state.is_fallback:
                 response.headers["X-Cache"] = "FALLBACK"
             return response
         except Exception as exc:
