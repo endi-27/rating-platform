@@ -154,6 +154,18 @@ services:
     ports:
       - "127.0.0.1:8002:8000"
 
+  backend_3:
+    <<: *backend-common
+    container_name: rating_backend_3
+    environment:
+      APP_CONFIG__DB__HOST: postgres
+      APP_CONFIG__REDIS__HOST: redis
+      APP_CONFIG__LOG__DIR: /logs
+      APP_CONFIG__STORAGE__DIR: /storage
+      APP_CONFIG__INSTANCE_ID: backend-3
+    ports:
+      - "127.0.0.1:8003:8000"
+
   worker:
     build:
       context: ./backend
@@ -200,6 +212,8 @@ services:
       backend_1:
         condition: service_healthy
       backend_2:
+        condition: service_healthy
+      backend_3:
         condition: service_healthy
     deploy:
       resources:

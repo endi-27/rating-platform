@@ -102,8 +102,9 @@ flowchart TD
     end
 
     subgraph App["Сервісний шар (Stateless Cluster)"]
-        Backend1["FastAPI Backend 1\n(:8000, X-Instance-ID: backend-1)"]
-        Backend2["FastAPI Backend 2\n(:8000, X-Instance-ID: backend-2)"]
+        Backend1["FastAPI Backend 1\n(:8001, X-Instance-ID: backend-1)"]
+        Backend2["FastAPI Backend 2\n(:8002, X-Instance-ID: backend-2)"]
+        Backend3["FastAPI Backend 3\n(:8003, X-Instance-ID: backend-3)"]
         Worker["ARQ Background Worker\n(Cron-задачі перерахунку та очищення)"]
     end
 
@@ -117,19 +118,24 @@ flowchart TD
     Client -->|"HTTP / JSON / Cookies"| Nginx
     Nginx -->|"HTTP Proxy (Round-Robin)"| Backend1
     Nginx -->|"HTTP Proxy (Round-Robin)"| Backend2
+    Nginx -->|"HTTP Proxy (Round-Robin)"| Backend3
 
     Backend1 <-->|"Cache-Aside / Circuit Breaker"| Redis
     Backend2 <-->|"Cache-Aside / Circuit Breaker"| Redis
+    Backend3 <-->|"Cache-Aside / Circuit Breaker"| Redis
     Backend1 -->|"SADD dirty_targets"| Redis
     Backend2 -->|"SADD dirty_targets"| Redis
+    Backend3 -->|"SADD dirty_targets"| Redis
 
     Worker <-->|"SPOP dirty_targets / Cron"| Redis
     Worker -->|"Batch Recalculate Bayesian Score"| PostgresPrimary
 
     Backend1 -->|"Write (Use Cases)"| PostgresPrimary
     Backend2 -->|"Write (Use Cases)"| PostgresPrimary
+    Backend3 -->|"Write (Use Cases)"| PostgresPrimary
     Backend1 -.->|"Read (Query Services)"| PostgresReplica
     Backend2 -.->|"Read (Query Services)"| PostgresReplica
+    Backend3 -.->|"Read (Query Services)"| PostgresReplica
 
     PostgresPrimary -.->|"Реплікація"| PostgresReplica
     PostgresPrimary -->|"Щоденний бекап о 02:00"| Backup
@@ -137,7 +143,7 @@ flowchart TD
 
 ### Stateless-архітектура та аудит стану
 
-У рамках Лабораторної роботи №2 сервісний шар платформи оптимізовано для безшовного горизонтального масштабування. Усі екземпляри бекенду (`backend-1`, `backend-2`) є повністю взаємозамінними, а будь-який локальний стан усунуто або винесено у спільні сховища.
+У рамках Лабораторних робіт №2 та №3 сервісний шар платформи оптимізовано для безшовного горизонтального масштабування. Усі екземпляри бекенду (`backend-1`, `backend-2`, `backend-3`) є повністю взаємозамінними, а будь-який локальний стан усунуто або винесено у спільні сховища.
 
 | Категорія стану | Компоненти системи | Спосіб ізоляції та винесення стану |
 | :--- | :--- | :--- |
@@ -146,7 +152,41 @@ flowchart TD
 | **Critical Stateful Dependencies (Усунено)** | In-memory сесії, глобальні `dict`/`list` кеші, локальні блокування `asyncio.Lock`, Sticky Sessions | Повністю усунено. Автентифікація базується на stateless `HttpOnly` JWT. Балансування через Nginx працює за чистим Round-Robin без сесійної прив'язки. |
 
 > [!NOTE]
-> Детальну специфікацію наскрізного потоку виконання запиту (*Stateless Request Flow*), аналіз Keep-Alive race conditions та конфігурацію спільної зони пам'яті Nginx див. у [**`docs/stateless-architecture.md`**](./docs/stateless-architecture.md).
+> Детальну специфікацію наскрізного потоку виконання запиту (*Stateless Request Flow*), аналіз Keep-Alive race conditions та конфігурацію спільних сесій див. у [**`docs/stateless-architecture.md`**](./docs/stateless-architecture.md).
+
+### Горизонтальне масштабування та балансування навантаження
+
+Сервісний шар розширено до пулу з 3 екземплярів FastAPI (`rating_backend_1` :8001, `rating_backend_2` :8002, `rating_backend_3` :8003) під керуванням **Nginx Load Balancer** зі спільною пам'яттю `zone fastapi_backend 64k`, пулом постійних з'єднань `keepalive 32` та пасивним healthcheck (`max_fails=2 fail_timeout=5s`).
+
+#### Порівняння алгоритмів балансування (Емпіричний бенчмарк)
+
+| Алгоритм | Розподіл (30 reqs) | Частка (%) | Latency Avg (мс) | Latency p95 (мс) | Характеристика та сфера застосування |
+| :--- | :---: | :---: | :---: | :---: | :--- |
+| **`round_robin`** | `10 / 10 / 10` | 33.3% / 33.3% / 33.3% | **4.46** | 6.29 | Симетричний циклічний розподіл для гомогенного кластера зі швидкими stateless-запитами. |
+| **`weighted`** (`3:2:1`) | `15 / 10 / 5` | 50.0% / 33.3% / 16.7% | **4.59** | 6.26 | Пропорційний розподіл за потужністю серверів або для поступових Canary Deployments. |
+| **`ip_hash`** | `0 / 30 / 0` | 0.0% / 100.0% / 0.0% | **4.97** | 7.76 | Детермінована сесійна прив'язка (Sticky Sessions); ризик дисбалансу за спільним NAT. |
+| **`least_conn`** | `10 / 10 / 10` | 33.3% / 33.3% / 33.3% | **4.66** | 8.65 | Маршрутизація на найменш завантажений вузол; критично перевершує RR при асиметричних затримках. |
+
+#### Ключові висновки експериментів
+* **Асиметричне навантаження (Grey Failure, +250ms на `backend-3`, 90 запитів, `concurrency=12`):**
+  Алгоритм `least_conn` продемонстрував пропускну здатність **334.74 RPS** проти **93.79 RPS** у `round_robin` (**у 3.57x вища продуктивність!**), скоротив частку трафіку на деградований вузол з 33.33% до **4.44%** та знизив хвостову затримку $p95$ у **5.6x** (з **363.15 мс** до **64.91 мс**).
+* **Горизонтальне масштабування (Scale-Out: 90 запитів, `concurrency=18`, latency 30ms):**
+  Пропускна здатність зросла з **203.45 RPS** (1 вузол, baseline) $\to$ **255.84 RPS** (2 вузли, 1.26x) $\to$ **360.49 RPS** (3 вузли, 1.77x), а $p95$ зменшився з 211.44 мс до **82.68 мс**. Сублінійний приріст (Закон Амдала) зумовлений конкуренцією за спільний пул з'єднань PostgreSQL 16 (`asyncpg`) та Redis, що підтверджує необхідність кешування читання (ЛР №4) та реплікації БД (ЛР №6).
+* **Відмовостійкість (Fault Tolerance & Failover):**
+  При аварійній зупинці `rating_backend_3` під навантаженням (40 запитів, `concurrency=8`) клієнти отримали **100% успішних відповідей (0% 5xx помилок)** завдяки `proxy_next_upstream` та `proxy_connect_timeout 1s`. Після повторного запуску контейнер автоматично повернувся у пул за **~5.8 с**.
+
+#### Керування та швидкий запуск бенчмарку
+```bash
+# Миттєве перемикання алгоритму балансування в Nginx (1, 2 або 3 вузли):
+bash scripts/load_balancing/switch_algorithm.sh <round_robin|least_conn|weighted|ip_hash> [1|2|3]
+
+# Запуск повного автоматизованого комплексу експериментів (ЛР №3):
+python3 scripts/load_balancing/run_experiments.py
+```
+
+> [!NOTE]
+> * **Компактний протокол вимірів та висновків для викладача:** [**`docs/load-balancing-experiments.md`**](./docs/load-balancing-experiments.md).
+> * **Повний розширений інженерний звіт (теорія, Закон Амдала, усунення SPOF Nginx):** [**`docs/load-balancing.md`**](./docs/load-balancing.md).
 
 ### Піковий сценарій навантаження (High-Load Scenario)
 
@@ -187,7 +227,8 @@ flowchart TD
 | Реалізація модуля `reviews` (доменні моделі, Use Cases, Query Services, OCC) | **A / R** | **I** |
 | Міграції Alembic, індекси та обмеження цілісності PostgreSQL | **A / R** | **R** |
 | Кешування Redis (Cache-Aside, Circuit Breaker) та фоновий воркер ARQ | **A / R** | **C** |
-| Контейнеризація застосунку (`Dockerfile`, `docker-compose.yaml`, масштабування інстансів `backend_1` та `backend_2`) | **C** | **A / R** |
+| Контейнеризація застосунку (`Dockerfile`, `docker-compose.yaml`, масштабування інстансів `backend_1`, `backend_2`, `backend_3`) | **C** | **A / R** |
+| Масштабування (ЛР №3: 3 інстанси FastAPI, динамічне балансування, бенчмаркінг алгоритмів) — Реалізовано у ЛР №3 | **C** | **A / R** |
 | Оркестрація автоміграцій (`rating_migrator`) та сідування SuperAdmin | **C** | **A / R** |
 | Автоматизація резервного копіювання БД (`rating_db_backup`, `pg_backup_rotated.sh`) | **I** | **A / R** |
 | Налаштування Nginx (Round-Robin, Failover), healthchecks, лімітів ресурсів та тестування відмовостійкості | **I** | **A / R** |
@@ -221,12 +262,13 @@ flowchart TD
    * `rating_migrator` — одноразовий контейнер, який виконує `alembic upgrade head` та створює обліковий запис `super_admin`;
    * `rating_backend_1` — перший stateless-інстанс FastAPI (порт `127.0.0.1:8001`, `X-Instance-ID: backend-1`);
    * `rating_backend_2` — другий stateless-інстанс FastAPI (порт `127.0.0.1:8002`, `X-Instance-ID: backend-2`);
+   * `rating_backend_3` — третій stateless-інстанс FastAPI (порт `127.0.0.1:8003`, `X-Instance-ID: backend-3`);
    * `rating_nginx` — реверс-проксі та балансувальник навантаження Nginx (порт `80`, спільна пам'ять Round-Robin та Failover);
    * `rating_worker` — фоновий воркер ARQ;
    * `rating_db_backup` — cron-контейнер щоденного бекапу БД у папку `./backups`.
 
 3. Перевірка роботи після запуску:
-   * Swagger UI (балансується між інстансами): `http://127.0.0.1/docs` (або прямий доступ до окремих вузлів: `http://127.0.0.1:8001/docs` та `http://127.0.0.1:8002/docs`)
+   * Swagger UI (балансується між інстансами): `http://127.0.0.1/docs` (або прямий доступ до окремих вузлів: `http://127.0.0.1:8001/docs`, `http://127.0.0.1:8002/docs`, `http://127.0.0.1:8003/docs`)
    * Healthcheck API: `http://127.0.0.1/api/v1/health` (Round-Robin із поверненням заголовка `X-Instance-ID`)
    * Healthcheck Nginx: `http://127.0.0.1/nginx-health`
 
@@ -239,24 +281,24 @@ bash scripts/resilience/verify_stateless.sh
 ```
 
 Скрипт послідовно виконує 3 сценарії:
-1. **Round-Robin & Node Identification:** серія запитів до `/api/v1/health` із перевіркою чергування заголовка `X-Instance-ID` (`backend-1` ⇄ `backend-2`);
+1. **Round-Robin & Node Identification:** серія запитів до `/api/v1/health` із перевіркою чергування заголовка `X-Instance-ID` (`backend-1` ⇄ `backend-2` ⇄ `backend-3`);
 2. **Cross-Instance Consistency:** створення та оновлення об'єкта на одному вузлі з миттєвим читанням актуального стану (та інвалідацією кешу) на іншому вузлі без Sticky Sessions;
-3. **Instance Loss / Crash Failover:** аварійна зупинка вузла (`docker stop rating_backend_1`) під навантаженням та підтвердження, що Nginx прозоро перенаправляє трафік на `backend_2` без жодної помилки `502`.
+3. **Instance Loss / Crash Failover:** аварійна зупинка вузла (`docker stop rating_backend_3`) під навантаженням та підтвердження, що Nginx прозоро перенаправляє трафік на живі вузли без жодної помилки `502`.
 
 **Приклади швидкої ручної перевірки через cURL:**
 
 ```bash
-# 1. Перевірка чергування вузлів кластера (Round-Robin):
-for i in {1..4}; do curl -s -I http://127.0.0.1/api/v1/health | grep -E "HTTP/|X-Instance-ID"; done
+# 1. Перевірка чергування вузлів кластера (Round-Robin на 3 вузли):
+for i in {1..6}; do curl -s -I http://127.0.0.1/api/v1/health | grep -E "HTTP/|X-Instance-ID"; done
 
-# 2. Симуляція збою вузла backend-1:
-docker stop rating_backend_1
+# 2. Симуляція збою вузла backend-3:
+docker stop rating_backend_3
 
-# 3. Перевірка підхоплення трафіку вузлом backend-2 (без 502 Bad Gateway):
+# 3. Перевірка підхоплення трафіку вузлами backend-1 та backend-2 (без 502 Bad Gateway):
 curl -s -I http://127.0.0.1/api/v1/health | grep -E "HTTP/|X-Instance-ID"
 
-# 4. Повернення першого вузла в стрій:
-docker start rating_backend_1
+# 4. Повернення третього вузла в стрій:
+docker start rating_backend_3
 ```
 
 ---

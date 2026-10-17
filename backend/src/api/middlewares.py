@@ -35,7 +35,10 @@ async def request_logger_middleware(
         # Можливість штучної затримки для тестування алгоритмів балансування (ЛР 3)
         latency_to_simulate = settings.simulate_latency_ms
         header_latency = request.headers.get("X-Simulate-Latency-Ms")
-        if header_latency and header_latency.strip().isdigit():
+        target_instance = request.headers.get("X-Simulate-Latency-Instance")
+
+        apply_header_latency = not target_instance or target_instance.strip() == settings.instance_id
+        if apply_header_latency and header_latency and header_latency.strip().isdigit():
             latency_to_simulate = max(latency_to_simulate, int(header_latency.strip()))
         if latency_to_simulate > 0:
             await asyncio.sleep(latency_to_simulate / 1000.0)
