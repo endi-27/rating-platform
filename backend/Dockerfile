@@ -67,4 +67,4 @@ USER appuser
 EXPOSE 8000
 
 # Дефолтний запуск FastAPI додатку через Uvicorn з підтримкою проксі-заголовків Nginx
-CMD ["uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers", "--forwarded-allow-ips=*", "--no-access-log"]
+CMD ["uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers", "--forwarded-allow-ips=*", "--timeout-keep-alive", "65", "--no-access-log"]
