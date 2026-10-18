@@ -214,6 +214,52 @@ python3 scripts/caching/run_cache_experiments.py
 > * **Компактний протокол вимірів для викладача:** [**`docs/caching-experiments.md`**](./docs/caching-experiments.md).
 > * **Повний розширений інженерний звіт та теорія захисту (Cache Stampede, Avalanche, Eviction, Invalidation):** [**`docs/distributed-caching.md`**](./docs/distributed-caching.md).
 
+### Навантажувальне тестування та Performance Baseline (ЛР №5)
+
+У рамках Лабораторної роботи №5 проведено комплексні навантажувальні випробування платформи за допомогою **k6** та автоматизованого раннера `scripts/load_testing/run_baseline_suite.py`. Зафіксовано поведінку системи на сходинках від 10 до 200 VUs для трьох сценаріїв навантаження, виявлено точку системного насичення (Saturation Point) та складено еталонний паспорт **System Performance Baseline**.
+
+#### Паспорт System Performance Baseline
+```text
+================================================================================
+                      === SYSTEM PERFORMANCE BASELINE ===                       
+================================================================================
+  Environment Config: 3 backend instances (FastAPI 3.12, 512MB RAM), PostgreSQL 16 (512MB RAM, max_connections=150), Redis 7 (300MB RAM, 0.5 CPU), Nginx 1.27 (128MB RAM, Keep-Alive=65s)
+  Stable Throughput:  505.89 RPS (under acceptable <35ms p95 latency)
+  Saturation Point:   25 VUs / 11.81 RPS threshold (Scenario B)
+  p95 / p99 Latency:  p95=35.27ms @ 10 VUs, p95=358.03ms @ 50 VUs (Read)
+  Error Rate:         0.00% across all ramp-up stages
+  Critical Scenario:  Scenario B (Write)
+  Primary Bottleneck: Database Transaction Locks & Cryptographic CPU Serialization (target_ratings row contention)
+================================================================================
+```
+
+#### Компактна таблиця порівняння сценаріїв навантаження
+
+| Сценарій / Тип | 10 VUs (RPS / p95) | 25 VUs (RPS / p95) | 50 VUs (RPS / p95) | 100 VUs (RPS / p95) | 200 VUs (RPS / p95) | Характеристика та вузьке місце |
+| :--- | :---: | :---: | :---: | :---: | :---: | :--- |
+| **Scenario A** *(Read-Intensive)* | **505.89** / 35.3мс | **456.57** / 142.5мс | **401.40** / 358.0мс | **455.31** / 566.5мс | **436.04** / 957.3мс | Високий Throughput, 100% кеш Redis, CPU Nginx/FastAPI |
+| **Scenario B** *(Write-Intensive)* | **11.65** / 1241.6мс | **11.81** / 2769.4мс *(Sat.)* | **11.09** / 4494.0мс | **11.90** / 8378.8мс | **11.94** / 16693.2мс | **Primary Bottleneck:** Блокування рядків `target_ratings` у СУБД |
+| **Scenario C** *(Complex Workflow)* | **53.52** / 739.1мс | **61.18** / 2209.3мс | **60.02** / 3487.1мс | **53.92** / 7142.9мс | **59.36** / 11602.4мс | Гібридний потік: затримка диктується кроком публікації відгуку |
+
+#### Команди швидкого запуску k6 тестів та генерації Baseline
+```bash
+# 1. Запуск сценаріїв навантаження через універсальний k6-раннер (Docker):
+bash load-tests/run_all.sh A -u 50 -d 30s        # Scenario A (Read)
+bash load-tests/run_all.sh B -u 25 -d 30s        # Scenario B (Write)
+bash load-tests/run_all.sh C -u 50 -d 30s        # Scenario C (Workflow)
+bash load-tests/run_all.sh all                   # Усі сценарії послідовно
+
+# 2. Запуск повного комплексу випробувань (Експерименти 1, 2, 3, 4 + Паспорт Baseline):
+python3 scripts/load_testing/run_baseline_suite.py --quick
+
+# Запуск повного прогону з експортом у JSON:
+python3 scripts/load_testing/run_baseline_suite.py --engine auto --duration 5.0
+```
+
+> [!NOTE]
+> * **Компактний протокол експериментів для викладача:** [**`docs/load-testing-experiments.md`**](./docs/load-testing-experiments.md).
+> * **Повний інженерний звіт та теорія захисту (Закон Літтла, Coordinated Omission, GC/Event Loop, Bottlenecks):** [**`docs/performance-baseline.md`**](./docs/performance-baseline.md).
+
 ### Піковий сценарій навантаження (High-Load Scenario)
 
 **Сценарій:** масовий наплив користувачів після релізу популярного об'єкта (співвідношення читання до запису — ~95% Read / 5% Write).
@@ -253,6 +299,7 @@ python3 scripts/caching/run_cache_experiments.py
 | Реалізація модуля `reviews` (доменні моделі, Use Cases, Query Services, OCC) | **A / R** | **I** |
 | Міграції Alembic, індекси та обмеження цілісності PostgreSQL | **A / R** | **R** |
 | Кешування Redis (ЛР №4: Cache-Aside, Circuit Breaker, Event-Driven інвалідація) — Реалізовано у ЛР №4 | **A / R** | **C** |
+| Навантажувальне тестування (ЛР №5: k6, Performance Baseline, аналіз точок насичення та черг) — Реалізовано у ЛР №5 | **A / R** | **R** |
 | Контейнеризація застосунку (`Dockerfile`, `docker-compose.yaml`, масштабування інстансів `backend_1`, `backend_2`, `backend_3`) | **C** | **A / R** |
 | Масштабування (ЛР №3: 3 інстанси FastAPI, динамічне балансування, бенчмаркінг алгоритмів) — Реалізовано у ЛР №3 | **C** | **A / R** |
 | Оркестрація автоміграцій (`rating_migrator`) та сідування SuperAdmin | **C** | **A / R** |
